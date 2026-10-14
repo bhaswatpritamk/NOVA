@@ -93,7 +93,11 @@ pytest
 
 ## Cloud GPU & Colab Workflow
 
-For training sessions using free cloud GPU instances (e.g., Google Colab), see [`docs/environment_setup.md`](docs/environment_setup.md#6-google-colab-cuda-verification-guide) for instructions on toggling the GPU runtime and running a non-assumptive CUDA diagnostic check.
+Google Colab is the designated execution environment for GPU training, while local workstations serve as the primary development environment.
+- In-depth training and persistence architecture: [`docs/colab_training_strategy.md`](docs/colab_training_strategy.md)
+- Environment setup and non-assumptive CUDA verification: [`docs/environment_setup.md`](docs/environment_setup.md)
+
+All scripts are provider-independent and can be executed either directly in a local terminal or called from Colab notebook cells (e.g., `!python scripts/environment_report.py`).
 
 ---
 

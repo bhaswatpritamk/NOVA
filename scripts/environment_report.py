@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Nova-Fit Environment Diagnostics Report.
+"""Nova-Fit Environment & Hardware Diagnostics Report.
 
 Collects and displays system hardware, runtime environment, disk storage,
-and deep learning framework capabilities (PyTorch & CUDA).
+and deep learning acceleration framework capabilities (PyTorch, CUDA, and GPU memory).
+
+Designed to be provider-independent: executable from a local terminal, a remote shell,
+or invoked via a Google Colab notebook cell.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
 import shutil
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 def get_available_ram_bytes() -> tuple[int | None, int | None]:
@@ -70,6 +74,67 @@ def format_bytes(num_bytes: int | None) -> str:
     return f"{mib:.2f} MiB ({num_bytes:,} bytes)"
 
 
+def collect_cuda_details() -> Dict[str, Any]:
+    """Inspect CUDA hardware accelerators, runtime versions, and VRAM capacity."""
+    cuda_info: Dict[str, Any] = {
+        "available": False,
+        "device_count": 0,
+        "runtime_version": None,
+        "devices": [],
+    }
+
+    try:
+        import torch  # type: ignore
+
+        cuda_available = bool(torch.cuda.is_available())
+        cuda_info["available"] = cuda_available
+        cuda_info["runtime_version"] = getattr(torch.version, "cuda", None)
+
+        if not cuda_available:
+            return cuda_info
+
+        count = torch.cuda.device_count()
+        cuda_info["device_count"] = count
+        devices_list: List[Dict[str, Any]] = []
+
+        for i in range(count):
+            props = torch.cuda.get_device_properties(i)
+            cap = torch.cuda.get_device_capability(i)
+            total_vram = props.total_memory
+            allocated_vram = torch.cuda.memory_allocated(i)
+            reserved_vram = torch.cuda.memory_reserved(i)
+
+            free_vram = None
+            try:
+                # mem_get_info returns (free_bytes, total_bytes)
+                free_bytes, _ = torch.cuda.mem_get_info(i)
+                free_vram = free_bytes
+            except Exception:
+                pass
+
+            dev_data = {
+                "index": i,
+                "name": torch.cuda.get_device_name(i),
+                "compute_capability": f"{cap[0]}.{cap[1]}",
+                "total_vram_bytes": total_vram,
+                "total_vram_human": format_bytes(total_vram),
+                "allocated_vram_bytes": allocated_vram,
+                "allocated_vram_human": format_bytes(allocated_vram),
+                "reserved_vram_bytes": reserved_vram,
+                "reserved_vram_human": format_bytes(reserved_vram),
+                "free_vram_bytes": free_vram,
+                "free_vram_human": format_bytes(free_vram),
+                "multi_processor_count": getattr(props, "multi_processor_count", None),
+            }
+            devices_list.append(dev_data)
+
+        cuda_info["devices"] = devices_list
+    except Exception as exc:
+        cuda_info["error"] = str(exc)
+
+    return cuda_info
+
+
 def collect_environment_report() -> Dict[str, Any]:
     """Collect runtime environment metadata and hardware specifications."""
     report: Dict[str, Any] = {}
@@ -119,25 +184,21 @@ def collect_environment_report() -> Dict[str, Any]:
         report["disk_total_human"] = "Not measurable"
         report["disk_free_human"] = "Not measurable"
 
-    # PyTorch and acceleration framework
+    # Deep learning framework and GPU acceleration
     try:
         import torch  # type: ignore
 
         report["pytorch_installed"] = True
         report["pytorch_version"] = torch.__version__
-        report["cuda_available"] = bool(torch.cuda.is_available())
-        if report["cuda_available"]:
-            report["cuda_device_count"] = torch.cuda.device_count()
-            report["cuda_device_names"] = [
-                torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
-            ]
-            report["cuda_runtime_version"] = torch.version.cuda
-        else:
-            report["cuda_device_count"] = 0
-            report["cuda_device_names"] = []
-            report["cuda_runtime_version"] = getattr(torch.version, "cuda", None)
 
-        # Check MPS (macOS) if relevant
+        cuda_info = collect_cuda_details()
+        report["cuda_available"] = cuda_info["available"]
+        report["cuda_device_count"] = cuda_info["device_count"]
+        report["cuda_device_names"] = [d["name"] for d in cuda_info["devices"]]
+        report["cuda_runtime_version"] = cuda_info["runtime_version"]
+        report["cuda_details"] = cuda_info
+
+        # Apple silicon MPS check (for cross-platform completeness)
         report["mps_available"] = bool(
             hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         )
@@ -148,6 +209,12 @@ def collect_environment_report() -> Dict[str, Any]:
         report["cuda_device_count"] = 0
         report["cuda_device_names"] = []
         report["cuda_runtime_version"] = None
+        report["cuda_details"] = {
+            "available": False,
+            "device_count": 0,
+            "runtime_version": None,
+            "devices": [],
+        }
         report["mps_available"] = False
 
     return report
@@ -187,21 +254,40 @@ def print_environment_report(report: Dict[str, Any] | None = None) -> None:
 
     print("\n[PyTorch & Hardware Acceleration]")
     print(f"  PyTorch Version : {report.get('pytorch_version')}")
-    cuda_status = "Available" if report.get("cuda_available") else "Not Available (CPU mode)"
+    cuda_status = "Available (GPU mode)" if report.get("cuda_available") else "Not Available (CPU mode)"
     print(f"  CUDA Status     : {cuda_status}")
+
     if report.get("cuda_available"):
-        print(f"  CUDA Devices    : {report.get('cuda_device_count')}")
-        for i, name in enumerate(report.get("cuda_device_names", [])):
-            print(f"    - Device {i}   : {name}")
-        print(f"  CUDA Version    : {report.get('cuda_runtime_version')}")
+        cuda_details = report.get("cuda_details", {})
+        print(f"  CUDA Runtime    : {cuda_details.get('runtime_version')}")
+        print(f"  GPU Count       : {cuda_details.get('device_count')}")
+        for dev in cuda_details.get("devices", []):
+            print(f"\n  [GPU Device {dev.get('index')}: {dev.get('name')}]")
+            print(f"    Compute Cap.  : {dev.get('compute_capability')}")
+            print(f"    Total VRAM    : {dev.get('total_vram_human')}")
+            print(f"    Free VRAM     : {dev.get('free_vram_human')}")
+            print(f"    Allocated     : {dev.get('allocated_vram_human')}")
+            print(f"    Reserved      : {dev.get('reserved_vram_human')}")
     else:
         print("  CUDA Notes      : Expected for local workstation (CPU development).")
+        print("                    In Google Colab, enable GPU via:")
+        print("                    Runtime -> Change runtime type -> T4 GPU.")
 
     print(header)
 
 
 def main() -> None:
-    if "--json" in sys.argv:
+    parser = argparse.ArgumentParser(
+        description="Nova-Fit Environment Diagnostics & Hardware Inspector"
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print diagnostics report in JSON format for automated pipelines.",
+    )
+    args = parser.parse_args()
+
+    if args.json:
         report = collect_environment_report()
         print(json.dumps(report, indent=2))
     else:
