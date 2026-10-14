@@ -54,17 +54,32 @@ checkpoints/*
 *.ckpt
 *.onnx
 
-# Datasets and raw data (mandatory constraint)
+# Datasets and raw source material
 data/*
 !data/.gitkeep
-*.csv
-*.tsv
-*.jsonl
-*.parquet
-*.arrow
-*.tar
-*.gz
-*.zip
+
+# Never commit raw or generated training corpora by default
+data/raw/
+data/approved/
+data/interim/
+data/processed/
+data/benchmark/
+
+# Local source downloads and archives
+scripts/sources/
+
+# Generated model artifacts and checkpoints
+artifacts/*
+!artifacts/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Credentials and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
 # Generated artifacts and experiment outputs
 artifacts/*

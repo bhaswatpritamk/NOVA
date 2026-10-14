@@ -1,0 +1,23 @@
+{
+  "name": "nova-fit-dataset",
+  "version": "0.1.0",
+  "corpus_paths": [
+    "data/raw/fitness_smoke_corpus.txt"
+  ],
+  "tokenizer_path": "artifacts/tokenizer",
+  "output_dir": "data/prepared",
+  "max_seq_len": 512,
+  "val_ratio": 0.05,
+  "split_seed": 42,
+  "drop_last_short": false,
+  "add_eos": true,
+  "cleaning": {
+    "strip_comment_lines": true,
+    "strip_section_headers": false,
+    "normalize_whitespace": true,
+    "strip_leading_trailing": true,
+    "min_doc_chars": 20,
+    "lowercase": false
+  },
+  "notes": "Nova-Fit Phase 3 Dataset Preparation configuration. Smoke corpus fixture produces a small dataset for pipeline verification. Production corpus will be larger."
+}

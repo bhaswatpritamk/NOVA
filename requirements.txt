@@ -1,15 +1,24 @@
-# Pinned compatible dependencies verified for Project Nova-Fit Phase 0
+# Pinned compatible dependencies verified for Project Nova-Fit Phase 0 and Phase 1
 # Python runtime: >=3.10 (tested and verified on Python 3.14.8)
 
 torch==2.14.1
 numpy==2.5.4
 psutil==7.2.2
 pytest==9.1.1
+tokenizers==0.23.3
 
 # Secondary runtime dependencies pinned for strict reproducibility
+anyio==4.15.1
+click==8.5.0
 colorama==0.4.6
 filelock==4.1.1
 fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.7.0
+httpcore2==2.13.1
+httpx2==2.13.1
+huggingface-hub==2.2.0
+idna==3.20
 iniconfig==2.3.1
 Jinja2==3.1.6
 MarkupSafe==3.0.4
@@ -18,6 +27,10 @@ networkx==3.7
 packaging==26.3
 pluggy==1.6.0
 Pygments==2.21.0
+pyyaml==6.0.3
 setuptools==84.0.0
 sympy==1.14.0
+tqdm==4.70.1
+truststore==0.10.5
 typing_extensions==4.16.0
+

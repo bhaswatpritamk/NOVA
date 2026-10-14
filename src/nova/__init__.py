@@ -1,3 +1,154 @@
 """Nova-Fit: Fitness-specialized language model package."""
 
+from nova.checkpoint import (
+    CheckpointCompatibilityError,
+    CheckpointCorruptedError,
+    CheckpointError,
+    load_checkpoint,
+    save_checkpoint,
+)
+from nova.corpus import (
+    TOPIC_DOMAINS,
+    CorpusDocument,
+    DuplicateAuditResult,
+    SourceProvenanceRecord,
+    SourceRegistry,
+    SplitStats,
+    calculate_split_statistics,
+    detect_duplicates_and_group,
+    partition_documents_by_group,
+)
+from nova.data import (
+    CleaningConfig,
+    DuplicateReport,
+    NovaPretrainingDataset,
+    PrepareDatasetConfig,
+    PrepareDatasetResult,
+    detect_exact_and_near_duplicates,
+    load_manifest,
+    load_prepared_dataset,
+    prepare_dataset,
+    split_documents,
+    verify_sources_against_registry,
+)
+from nova.evaluate import (
+    EvaluationResult,
+    evaluate_model,
+)
+from nova.model import (
+    CausalLMOutput,
+    CausalSelfAttention,
+    NovaConfig,
+    NovaForCausalLM,
+    RMSNorm,
+    RotaryEmbedding,
+    SwiGLU,
+    TransformerBlock,
+    build_tiny_model,
+)
+from nova.tokenizer import (
+    DEFAULT_SPECIAL_TOKENS,
+    DEFAULT_SPECIAL_TOKENS_MAP,
+    NovaTokenizer,
+    decode,
+    encode,
+    load_tokenizer,
+    train_tokenizer,
+)
+from nova.train import (
+    Trainer,
+    TrainerResult,
+    TrainingConfig,
+    get_lr_scheduler,
+    set_seed,
+)
+from nova.claims import (
+    ClaimCategory,
+    ClaimRecord,
+    ClaimReviewRegistry,
+    DocumentTraceabilityRecord,
+    RiskLevel,
+    VerificationStatus,
+    analyze_text_for_claims,
+)
+from nova.benchmark import (
+    BenchmarkEvaluationReport,
+    BenchmarkItemScore,
+    BenchmarkQuestion,
+    BenchmarkQuestionType,
+    BenchmarkRubric,
+    FitnessEvaluationBenchmark,
+    evaluate_model_on_benchmark_passages,
+)
+
 __version__ = "0.1.0"
+
+__all__ = [
+    # Phase 1: Tokenizer
+    "NovaTokenizer",
+    "train_tokenizer",
+    "load_tokenizer",
+    "encode",
+    "decode",
+    "DEFAULT_SPECIAL_TOKENS",
+    "DEFAULT_SPECIAL_TOKENS_MAP",
+    # Phase 2: Model
+    "NovaConfig",
+    "NovaForCausalLM",
+    "CausalLMOutput",
+    "RMSNorm",
+    "RotaryEmbedding",
+    "CausalSelfAttention",
+    "SwiGLU",
+    "TransformerBlock",
+    "build_tiny_model",
+    # Phase 3 & 4: Dataset Preparation & Provenance
+    "NovaPretrainingDataset",
+    "PrepareDatasetConfig",
+    "PrepareDatasetResult",
+    "CleaningConfig",
+    "DuplicateReport",
+    "detect_exact_and_near_duplicates",
+    "split_documents",
+    "verify_sources_against_registry",
+    "prepare_dataset",
+    "load_prepared_dataset",
+    "load_manifest",
+    # Phase 5: Checkpointing, Evaluation, & Training
+    "CheckpointError",
+    "CheckpointCompatibilityError",
+    "CheckpointCorruptedError",
+    "save_checkpoint",
+    "load_checkpoint",
+    "EvaluationResult",
+    "evaluate_model",
+    "TrainingConfig",
+    "Trainer",
+    "TrainerResult",
+    # Phase 6: Corpus Expansion & Data Quality
+    "TOPIC_DOMAINS",
+    "SourceProvenanceRecord",
+    "SourceRegistry",
+    "CorpusDocument",
+    "DuplicateAuditResult",
+    "detect_duplicates_and_group",
+    "partition_documents_by_group",
+    "SplitStats",
+    "calculate_split_statistics",
+    # Phase 8: Claims & Benchmark
+    "ClaimCategory",
+    "RiskLevel",
+    "VerificationStatus",
+    "ClaimRecord",
+    "DocumentTraceabilityRecord",
+    "ClaimReviewRegistry",
+    "analyze_text_for_claims",
+    "BenchmarkQuestionType",
+    "BenchmarkRubric",
+    "BenchmarkQuestion",
+    "BenchmarkItemScore",
+    "BenchmarkEvaluationReport",
+    "FitnessEvaluationBenchmark",
+    "evaluate_model_on_benchmark_passages",
+    "__version__",
+]

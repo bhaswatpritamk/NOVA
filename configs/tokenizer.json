@@ -1,0 +1,34 @@
+{
+  "name": "nova-fit-tokenizer",
+  "version": "0.1.0",
+  "algorithm": "byte_level_bpe",
+  "target_vocab_size": 8000,
+  "min_frequency": 1,
+  "special_tokens": [
+    "<pad>",
+    "<unk>",
+    "<bos>",
+    "<eos>"
+  ],
+  "special_tokens_map": {
+    "pad_token": "<pad>",
+    "unk_token": "<unk>",
+    "bos_token": "<bos>",
+    "eos_token": "<eos>"
+  },
+  "pre_tokenizer": {
+    "type": "ByteLevel",
+    "add_prefix_space": false,
+    "trim_offsets": true
+  },
+  "decoder": {
+    "type": "ByteLevel"
+  },
+  "model": {
+    "type": "BPE",
+    "unk_token": "<unk>"
+  },
+  "default_corpus_path": "data/raw/fitness_smoke_corpus.txt",
+  "default_output_dir": "artifacts/tokenizer",
+  "notes": "Nova-Fit Phase 1 Byte-Level BPE configuration. Production target is 8000 tokens."
+}

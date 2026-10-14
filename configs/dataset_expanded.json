@@ -1,0 +1,25 @@
+{
+  "corpus_paths": [
+    "data/raw/fitness_smoke_corpus.txt"
+  ],
+  "tokenizer_path": "e:\\NOVA\\artifacts\\final_tokenizer",
+  "output_dir": "e:\\NOVA\\data\\prepared_expanded",
+  "max_seq_len": 512,
+  "val_ratio": 0.05,
+  "split_seed": 42,
+  "drop_last_short": false,
+  "cleaning": {
+    "strip_comment_lines": true,
+    "strip_section_headers": false,
+    "normalize_whitespace": true,
+    "strip_leading_trailing": true,
+    "min_doc_chars": 20,
+    "lowercase": false
+  },
+  "add_eos": true,
+  "split_level": "sequence",
+  "detect_duplicates": true,
+  "train_corpus_path": "e:\\NOVA\\data\\approved\\expanded_train_corpus.txt",
+  "val_corpus_path": "e:\\NOVA\\data\\approved\\expanded_val_corpus.txt",
+  "source_registry_path": "e:\\NOVA\\data\\approved\\source_registry.json"
+}

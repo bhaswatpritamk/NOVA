@@ -1,0 +1,34 @@
+{
+  "name": "nova-fit-final-tokenizer",
+  "version": "1.0.0",
+  "algorithm": "byte_level_bpe",
+  "target_vocab_size": 8000,
+  "min_frequency": 1,
+  "special_tokens": [
+    "<pad>",
+    "<unk>",
+    "<bos>",
+    "<eos>"
+  ],
+  "special_tokens_map": {
+    "pad_token": "<pad>",
+    "unk_token": "<unk>",
+    "bos_token": "<bos>",
+    "eos_token": "<eos>"
+  },
+  "pre_tokenizer": {
+    "type": "ByteLevel",
+    "add_prefix_space": false,
+    "trim_offsets": true
+  },
+  "decoder": {
+    "type": "ByteLevel"
+  },
+  "model": {
+    "type": "BPE",
+    "unk_token": "<unk>"
+  },
+  "corpus_path": "data/approved/train_corpus.txt",
+  "output_dir": "artifacts/final_tokenizer",
+  "notes": "Nova-Fit Phase 4 Final Tokenizer trained from scratch exclusively on data/approved/train_corpus.txt."
+}

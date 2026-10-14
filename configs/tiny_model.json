@@ -1,0 +1,18 @@
+{
+  "name": "nova-fit-tiny",
+  "version": "0.1.0",
+  "architecture": "decoder_only_transformer",
+  "vocab_size": 2274,
+  "max_seq_len": 32,
+  "d_model": 64,
+  "n_layers": 2,
+  "n_heads": 4,
+  "d_ff": 176,
+  "dropout": 0.0,
+  "rope_theta": 10000.0,
+  "norm_eps": 1e-5,
+  "tie_word_embeddings": false,
+  "pad_token_id": 0,
+  "initializer_range": 0.02,
+  "notes": "Nova-Fit Phase 2 Tiny Transformer configuration for deterministic CPU smoke testing and correctness verification."
+}

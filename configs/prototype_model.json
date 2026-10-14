@@ -1,0 +1,18 @@
+{
+  "name": "nova-prototype-533k",
+  "version": "1.0.0",
+  "architecture": "decoder_only_transformer",
+  "vocab_size": 3384,
+  "max_seq_len": 512,
+  "d_model": 64,
+  "n_layers": 2,
+  "n_heads": 4,
+  "d_ff": 176,
+  "dropout": 0.0,
+  "rope_theta": 10000.0,
+  "norm_eps": 1e-05,
+  "tie_word_embeddings": false,
+  "pad_token_id": 0,
+  "initializer_range": 0.02,
+  "notes": "Nova 533K parameter prototype model configured for the final 3,384 vocab BPE tokenizer. Used for testing, CPU sanity checks, and accelerator benchmarking."
+}

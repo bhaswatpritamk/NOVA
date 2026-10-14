@@ -1,0 +1,23 @@
+{
+  "name": "nova-fit-final-dataset",
+  "version": "1.0.0",
+  "train_corpus_path": "data/approved/train_corpus.txt",
+  "val_corpus_path": "data/approved/val_corpus.txt",
+  "tokenizer_path": "artifacts/final_tokenizer",
+  "output_dir": "data/prepared_final",
+  "source_registry_path": "data/approved/source_registry.json",
+  "max_seq_len": 512,
+  "split_level": "document",
+  "detect_duplicates": true,
+  "drop_last_short": false,
+  "add_eos": true,
+  "cleaning": {
+    "strip_comment_lines": true,
+    "strip_section_headers": false,
+    "normalize_whitespace": true,
+    "strip_leading_trailing": true,
+    "min_doc_chars": 20,
+    "lowercase": false
+  },
+  "notes": "Nova-Fit Phase 4 Final Prepared Dataset configuration. Explicit separate train/val frozen approved corpora."
+}

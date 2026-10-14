@@ -1,0 +1,18 @@
+{
+  "name": "nova-20m",
+  "version": "1.0.0",
+  "architecture": "decoder_only_transformer",
+  "vocab_size": 3384,
+  "max_seq_len": 512,
+  "d_model": 384,
+  "n_layers": 10,
+  "n_heads": 8,
+  "d_ff": 1024,
+  "dropout": 0.0,
+  "rope_theta": 10000.0,
+  "norm_eps": 1e-5,
+  "tie_word_embeddings": false,
+  "pad_token_id": 0,
+  "initializer_range": 0.02,
+  "notes": "Nova-20M baseline architecture configuration: 20,301,696 parameters. Designed for full-scale pretraining on cloud GPU (Colab T4/A100) once the pretraining corpus reaches >= 5M to 50M tokens."
+}
