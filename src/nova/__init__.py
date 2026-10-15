@@ -80,6 +80,26 @@ from nova.benchmark import (
     FitnessEvaluationBenchmark,
     evaluate_model_on_benchmark_passages,
 )
+from nova.ingestion import (
+    AuthoringMethod,
+    BenchmarkContaminationDetector,
+    CorpusDeduplicator,
+    DeduplicationResult,
+    FitnessPillar,
+    HealthSafetyScreener,
+    IngestionStatus,
+    LicenseCategory,
+    LicenseGateResult,
+    NormalizedDocument,
+    Phase10Manifest,
+    PillarCoverageStats,
+    SourceIngestionPipeline,
+    assess_text_quality,
+    audit_license,
+    normalize_corpus_text,
+    normalize_pillar,
+    source_level_split,
+)
 
 __version__ = "0.1.0"
 
@@ -150,5 +170,24 @@ __all__ = [
     "BenchmarkEvaluationReport",
     "FitnessEvaluationBenchmark",
     "evaluate_model_on_benchmark_passages",
+    # Phase 10: Verified Fitness Corpus Ingestion & Expansion
+    "FitnessPillar",
+    "LicenseCategory",
+    "LicenseGateResult",
+    "audit_license",
+    "AuthoringMethod",
+    "IngestionStatus",
+    "NormalizedDocument",
+    "normalize_corpus_text",
+    "assess_text_quality",
+    "normalize_pillar",
+    "HealthSafetyScreener",
+    "BenchmarkContaminationDetector",
+    "DeduplicationResult",
+    "CorpusDeduplicator",
+    "source_level_split",
+    "PillarCoverageStats",
+    "Phase10Manifest",
+    "SourceIngestionPipeline",
     "__version__",
 ]

@@ -30,16 +30,20 @@ To scale Project NOVA towards and beyond the 1,000,000-token engineering milesto
 ```
 
 ### Mandatory Acceptance Criteria
-1. **Verifiable Open License**:
-   - Primary basis: Official works of the U.S. Federal Government under **17 U.S.C. § 105** (Public Domain worldwide).
-   - Secondary basis: Open-access scientific and educational publications under **Creative Commons Attribution 4.0 International (CC BY 4.0)** or **CC0 1.0 Universal**.
+1. **Verifiable Open License & Jurisdiction Boundary**:
+   - Primary basis: Official works of the U.S. Federal Government created by federal employees/officers within the scope of their official employment under **17 U.S.C. § 105** (Domestic U.S. Public Domain).
+     * *Territorial Scope Note*: 17 U.S.C. § 105 precludes copyright protection within the United States. It does not automatically guarantee worldwide public domain status, as foreign jurisdictions may enforce copyright unless explicitly waived or governed by bilateral conventions.
+     * *Contractor Exclusion*: Works prepared by independent contractors, research grantees, or academic consortiums funded by federal grants do NOT automatically fall under § 105 and require proof of formal intellectual property assignment or independent open licensing.
+   - Secondary basis: Open-access scientific and educational publications under **Creative Commons Attribution 4.0 International (CC BY 4.0)** or **CC0 1.0 Universal** (Worldwide public domain dedication).
    - Strictly prohibited: Commercial copyrighted books, non-commercial restricted material (CC BY-NC), no-derivatives material (CC BY-ND), or scraping gated subscription journals.
 2. **Attribution and Provenance Preservation**:
-   - Full statutory attribution, authoring body, publication year, and source URL must be logged in `data/approved/source_registry.json`.
+   - Full statutory attribution, authoring body, publication year, retrieval timestamp, and source URL must be logged in `data/approved/source_registry.json`.
 3. **Exclusion of Non-Free Third-Party Elements**:
-   - Diagrams, commercial trade names, photographs, and external quotations from third-party copyright holders must be purged before ingestion.
+   - Diagrams, commercial trade names, photographs, and external quotations from third-party copyright holders must be purged before ingestion. Federal reports often include third-party copyrighted figures that do not enter the public domain.
 4. **No Synthetic Filler**:
    - Text must never be hallucinated or generated merely to pad token counts. Summaries or syntheses must be formally designated as `educational_synthesis` rather than primary extracts.
+5. **Human Review Override Isolation**:
+   - Human review overrides are restricted to resolving ambiguous licensing or contractor IP assignment. An override CANNOT bypass text quality filters, health safety screening, or held-out benchmark contamination checks.
 
 ---
 
