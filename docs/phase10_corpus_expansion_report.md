@@ -388,3 +388,208 @@ The first source-backed staging corpus and the ingestion verification pipeline a
 1. **Editorial Review of Quarantined CDC Measuring Guide**: Edit the ~20 words overlapping with the held-out benchmark question in `US-CDC-PA-MEASURING-2022` to resolve the n-gram match and safely promote the remaining 4,200 tokens into the approved staging pool.
 2. **Full Report Ingestion Batch**: Proceed with acquiring the full text of *U.S. Army FM 7-22* (~220K tokens) and *NIOSH Criteria 2016-106* (~110K tokens) using the verified staging workflow.
 
+---
+
+## 10. Phase 10.2: Verified Source Acquisition and Scalable Corpus Expansion
+
+### 10.1 Executive Overview
+Phase 10.2 advances NOVA's data pipeline from initial pipeline validation to verified multi-source acquisition and modular ingestion of authentic primary literature.
+
+Key accomplishments in Phase 10.2:
+1. **Resolved CDC Measuring Guide Benchmark Match**: Upgraded `BenchmarkContaminationDetector` to differentiate harmless bibliographic title citations from genuine question/answer leakage. Tracked precise character offsets and decision rationales. Preserved authentic source text without doctoring or redacting words.
+2. **Acquired 2018 PAGAC Scientific Report**: Retrieved full 779-page PDF directly from official HHS servers (29,676,586 bytes, SHA-256 `c13c25e34ab607ddc3e98bfc550e6c0f30e214581d1b9540b87e50d153703568`). Extracted 7 modular narrative sections across health and exercise science pillars.
+3. **Quarantined Authentic Leakage Without Redaction**: In strict accordance with Mandatory Constraint 5 ("Never rewrite or redact authentic source text merely to bypass a benchmark-contamination detector"), PAGAC Part C (Key Concepts) containing the exact federal 150-300 min/week aerobic recommendation used in the benchmark answer key was quarantined rather than altered.
+4. **Audited U.S. Army FM 7-22 Intellectual Property**: Discovered that FM 7-22 Chapter 7 incorporates the proprietary commercial registered trademark "Pose Method®" (Dr. Nicholas Romanov), and Army Publishing Directorate blocks automated retrievers with HTTP 403. Formally quarantined `US-ARMY-FM-7-22` pending legal carve-out.
+5. **Scaled Usable Staging Corpus**: Expanded accepted staging corpus to **97,809 usable tokens** across 10 authentic documents, maintaining strict DSU source-level partition disjointness and zero benchmark leakage.
+6. **Automated Verification**: Added 5 regression tests in `TestPhase102BenchmarkResolution`; verified 100% pass rate across the full 239-test repository suite.
+
+---
+
+### 10.2 Task 1: Resolution of Benchmark Contamination Detector
+
+#### 10.2.1 Forensic Investigation of Quarantined CDC Guide
+In Phase 10.1, [`data/staging_phase10/sources_raw/us_cdc_pa_measuring_2022.md`](file:///e:/NOVA/data/staging_phase10/sources_raw/us_cdc_pa_measuring_2022.md) was quarantined because it matched an 8-word sequence:
+`"the physical activity guidelines for americans 2nd edition"`
+
+Forensic inspection against [`data/benchmark/fitness_eval_benchmark.json`](file:///e:/NOVA/data/benchmark/fitness_eval_benchmark.json) revealed:
+- **Benchmark Item**: `BENCH_P7_FACT_01` (Pillar 7, Federal Physical Activity Guidelines).
+- **Prompt Text**: *"According to the Physical Activity Guidelines for Americans, 2nd edition, what are the minimum weekly physical activity recommendations for substantial health benefits in adults...?"*
+- **Matched Passage**: The matched passage in the CDC measuring guide was purely a formal bibliographic citation referencing the federal guidelines document. It contained zero question logic, zero multiple-choice options, and zero substantive answer leakage.
+
+#### 10.2.2 Detector Architecture Upgrade
+To resolve this without weakening benchmark safeguards, `src/nova/ingestion.py` was enhanced:
+1. **Bibliographic Title Registry (`RECOGNIZED_BIBLIOGRAPHIC_TITLES`)**:
+   Registered standard statutory and governmental publication titles (e.g., *"physical activity guidelines for americans 2nd edition"*, *"dietary guidelines for americans"*).
+2. **Offset and Rationale Tracking (`ContaminationMatch` and `ContaminationCheckResult`)**:
+   - Every match records `char_start`, `char_end`, `matched_text`, `benchmark_question_id`, `benchmark_version` ("1.0.0"), `match_origin` ("Prompt" or "Answer"), `is_bibliographic_title` (boolean), and `decision_rationale`.
+3. **Rigorous Decision Matrix**:
+   - `is_bibliographic_title=True` and `is_genuine_leakage=False`: Classified as `BIBLIOGRAPHIC_CITATION` (`is_contaminated=False`). Passes without quarantine while recording full match offsets on `doc.benchmark_matches`.
+   - `is_genuine_leakage=True`: Substantive questions or canonical reference answers trigger immediate `QUARANTINE` (`is_contaminated=True`).
+   - Mixed text containing both a title and genuine leakage triggers immediate `QUARANTINE`.
+4. **Strict Adherence to Constraint 5**:
+   The raw CDC measuring guide text in `data/staging_phase10/sources_raw/us_cdc_pa_measuring_2022.md` was **not modified, edited, or redacted**. It now passes the upgraded detector on its authentic merits.
+
+#### 10.2.3 Automated Regression Tests
+Added `TestPhase102BenchmarkResolution` in `tests/test_phase10.py`:
+- `test_harmless_title_reference_not_quarantined`: Asserts title citations pass cleanly with exact offsets and `is_genuine_leakage=False`.
+- `test_genuine_prompt_leakage_quarantined`: Asserts operative inquiry prompts trigger quarantine.
+- `test_genuine_answer_leakage_quarantined`: Asserts canonical reference answer key text triggers quarantine.
+- `test_mixed_title_and_leakage_quarantined`: Asserts genuine leakage is never masked by a publication title.
+- `test_pipeline_audit_preserves_matches_and_offsets`: Asserts pipeline preserves full match metadata on `NormalizedDocument`.
+
+---
+
+### 10.3 Task 2: Source Acquisition & Legal Provenance Records
+
+Detailed provenance and legal reviews were conducted for the candidate primary sources:
+
+#### 1. 2018 Physical Activity Guidelines Advisory Committee Scientific Report
+- **Exact Title**: *2018 Physical Activity Guidelines Advisory Committee Scientific Report*
+- **Authoring Body**: 2018 Physical Activity Guidelines Advisory Committee (Advisory to the Secretary of Health and Human Services).
+- **Publication Date**: February 2018.
+- **Canonical URL**: `https://odphp.health.gov/sites/default/files/2019-09/PAG_Advisory_Committee_Report.pdf`
+- **Actual Retrieval Date**: 2026-10-15.
+- **Retrieval Method**: Automated HTTPS stream retrieval with user-agent compliance into `data/staging_phase10/sources_raw/us_hhs_pagac_report_2018.pdf`.
+- **Original File Format**: PDF (779 pages, 29,676,586 bytes).
+- **Original SHA-256 Digest**: `c13c25e34ab607ddc3e98bfc550e6c0f30e214581d1b9540b87e50d153703568`.
+- **Legal Basis**: **17 U.S.C. § 105** (Work of the U.S. Federal Government, Public Domain).
+- **Third-Party Exclusions & Carve-Outs**: The 779-page report incorporates embedded figures, meta-analysis charts, and tables adapted from commercial academic journals (e.g., *Medicine & Science in Sports & Exercise*, *JAMA*, *Lancet*). These figures retain private publisher copyright. Under NOVA extraction policy, only narrative committee consensus text is extracted; all non-free figures, charts, and third-party graphics are strictly excluded.
+- **Modular Sections Extracted**:
+  - `US-HHS-PAGAC-2018-EXEC` (Part A Executive Summary, pp. 23-35) — 14,989 tokens (Pillar 7).
+  - `US-HHS-PAGAC-2018-CONCEPTS` (Part C Key Concepts, pp. 61-75) — 17,864 tokens (Pillar 1) -> **Quarantined** (Contains genuine answer key match to `BENCH_P7_FACT_01`; preserved intact without redaction).
+  - `US-HHS-PAGAC-2018-HIIT` (Part F Ch 1 Bouts & HIIT, pp. 107-120) — 12,891 tokens (Pillar 2).
+  - `US-HHS-PAGAC-2018-BRAIN-SLEEP` (Part F Ch 3 Brain Health & Sleep, pp. 207-222) — 16,503 tokens (Pillar 5).
+  - `US-HHS-PAGAC-2018-CARDIOMETABOLIC` (Part F Ch 5 Cardiometabolic & Weight, pp. 315-330) — 16,738 tokens (Pillar 4).
+  - `US-HHS-PAGAC-2018-OLDER-ADULTS` (Part F Ch 9 Older Adults & Sarcopenia, pp. 473-486) — 18,167 tokens (Pillar 6).
+  - `US-HHS-PAGAC-2018-GLOSSARY` (Part H App 1 Glossary, pp. 757-768) — 11,057 tokens (Pillar 7) -> **Quarantined** (Clinical diagnostic dictionary terms).
+
+#### 2. U.S. Army Field Manual FM 7-22: Holistic Health and Fitness
+- **Exact Title**: *Field Manual FM 7-22: Holistic Health and Fitness*
+- **Authoring Body**: Headquarters, Department of the Army (HQDA).
+- **Publication Date**: October 2020.
+- **Canonical URL**: `https://armypubs.army.mil/epubs/DR_pubs/DR_a/ARN30964-FM_7-22-001-WEB-4.pdf`
+- **Actual Retrieval Date**: 2026-10-15.
+- **Retrieval Method & Gate Outcome**: Direct fetch attempt from official Army Publishing Directorate (APD) returned **HTTP 403 Forbidden** due to DoD perimeter Cloudflare WAF blocking non-browser agents.
+- **Legal & Intellectual Property Audit**:
+  - FM 7-22 is primarily a military publication under 17 U.S.C. § 105.
+  - However, Chapter 7 ("Running Technique") explicitly incorporates the commercial registered trademark and proprietary methodology **"Pose Method®"** developed by Dr. Nicholas Romanov (Bikila Corp / Pose Method).
+  - 17 U.S.C. § 105 eliminates domestic copyright for U.S. government employee works, but **does not grant license or indemnity for embedded private trademarks or third-party commercial intellectual property**.
+- **Governance Decision**: In accordance with Task 2 ("Quarantine ambiguous licensing or authorship cases"), `US-ARMY-FM-7-22` is placed in `QUARANTINED_PENDING_LEGAL_REVIEW` / licensing gate rejection until formal legal review determines whether a chapter-level carve-out or bilateral license is required.
+
+---
+
+### 10.4 Task 3: Controlled Staging Ingestion Execution & Metrics
+
+The controlled staging pipeline was executed via [`scripts/run_staging_ingestion.py`](file:///e:/NOVA/scripts/run_staging_ingestion.py):
+
+```text
+================================================================================
+PHASE 10.2 STAGING INGESTION RESULTS:
+================================================================================
+Sources Attempted:       16
+Sources Accepted:        10
+Sources Rejected:        2
+Sources Quarantined:     4
+Original Documents:      10
+Usable Staging Tokens:   97,809
+  - Training Tokens:     80,120 (Sources: PLOS-PONE-0215877, US-CDC-PA-ADULTS-2022, US-CDC-PA-MEASURING-2022, US-CDC-PA-OLDER-2022, US-HHS-PAGAC-2018-BRAIN-SLEEP, US-HHS-PAGAC-2018-CARDIOMETABOLIC, US-HHS-PAGAC-2018-EXEC, US-HHS-PAGAC-2018-OLDER-ADULTS)
+  - Validation Tokens:   17,689 (Sources: US-CDC-NIOSH-HEAT-2016, US-HHS-PAGAC-2018-HIIT)
+Train/Val Source Overlap:NONE (STRICTLY DISJOINT)
+Benchmark Contamination: 0
+```
+
+#### Detailed Source Ingestion Ledger
+| Source ID | Document Title | Words | Tokens | Pillar | Gate Status & Notes |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| `US-CDC-PA-ADULTS-2022` | CDC Adult Activity Guidelines | 1,212 | 3,877 | Exercise Physiology | **ACCEPTED** (Public Domain) |
+| `US-CDC-PA-MEASURING-2022` | CDC Measuring Activity Intensity | 1,324 | 4,299 | Exercise Physiology | **ACCEPTED** (Title citation cleared) |
+| `US-CDC-PA-OLDER-2022` | CDC Older Adult Guidelines | 1,468 | 4,534 | Injury Prevention | **ACCEPTED** (Public Domain) |
+| `US-CDC-NIOSH-HEAT-2016` | NIOSH Heat Stress Criteria | 1,715 | 4,798 | Nutrition & Hydration | **ACCEPTED** (Public Domain, Val) |
+| `PLOS-PONE-0215877` | PLOS ONE RT Frequency Meta-Analysis | 282 | 1,013 | Strength Training | **ACCEPTED** (CC BY 4.0) |
+| `US-HHS-PAGAC-2018-EXEC` | PAGAC Part A: Executive Summary | 4,320 | 14,989 | Fitness Education | **ACCEPTED** (Public Domain) |
+| `US-HHS-PAGAC-2018-HIIT` | PAGAC Part F Ch 1: Bouts & HIIT | 3,910 | 12,891 | Strength Training | **ACCEPTED** (Public Domain, Val) |
+| `US-HHS-PAGAC-2018-BRAIN-SLEEP` | PAGAC Part F Ch 3: Brain & Sleep | 6,323 | 16,503 | Recovery & Sleep | **ACCEPTED** (Public Domain) |
+| `US-HHS-PAGAC-2018-CARDIOMETABOLIC` | PAGAC Part F Ch 5: Cardiometabolic | 6,142 | 16,738 | Nutrition & Hydration | **ACCEPTED** (Public Domain) |
+| `US-HHS-PAGAC-2018-OLDER-ADULTS` | PAGAC Part F Ch 9: Sarcopenia & Falls | 5,524 | 18,167 | Injury Prevention | **ACCEPTED** (Public Domain) |
+| `US-HHS-PAGAC-2018-CONCEPTS` | PAGAC Part C: Key Concepts | — | — | Exercise Physiology | **QUARANTINED** (Answer leakage; text intact) |
+| `US-HHS-PAGAC-2018-GLOSSARY` | PAGAC Part H: Glossary | — | — | Fitness Education | **QUARANTINED** (Clinical dictionary terms) |
+| `US-ARMY-FM-7-22` | Army FM 7-22 Holistic Health | — | — | Biomechanics | **REJECTED/QUARANTINED** (Pose Method® IP) |
+| `SAMPLE-REJECTED-PROPRIETARY` | Commercial Strength Manual | — | — | Strength Training | **REJECTED** (Proprietary license) |
+| `SAMPLE-QUARANTINED-UNSAFE` | Extreme Weight Cut & PED | — | — | Exercise Physiology | **QUARANTINED** (Safety screener) |
+| `SAMPLE-QUARANTINED-SCANNED` | Historical Physical Culture | — | — | Fitness Education | **QUARANTINED** (Scanned image PDF) |
+
+---
+
+### 10.5 Task 4: Corpus Quality, Balance, and Gap Identification
+
+#### 10.5.1 Pillar Balance in Staging Corpus
+| Pillar Identifier | Display Title | Tokens | Staging % | Baseline Status & Balance Assessment |
+| :--- | :--- | :---: | :---: | :--- |
+| **1. `exercise_science_biomechanics`** | Exercise Physiology & General Fitness | 8,176 | 8.4% | Well-grounded in CDC adult guides. |
+| **2. `strength_training_programming`** | Strength Training & Programming | 13,904 | 14.2% | Robust coverage from PLOS ONE meta-analysis and PAGAC HIIT. |
+| **3. `exercise_technique_safety`** | Biomechanics & Movement Execution | 0 | 0.0% | **IDENTIFIED CRITICAL GAP**: FM 7-22 quarantined due to Pose Method® trademark. |
+| **4. `nutrition_fundamentals_hydration`** | Nutrition & Hydration | 21,536 | 22.0% | Extensive coverage from NIOSH Heat and PAGAC Cardiometabolic. |
+| **5. `sleep_recovery_physical_activity`** | Recovery & Sleep | 16,503 | 16.9% | Deep scientific consensus coverage from PAGAC Brain & Sleep. |
+| **6. `training_adaptations_fatigue_load`** | Injury Prevention & Exercise Safety | 22,701 | 23.2% | Strong evidence base from CDC Older Adults and PAGAC Sarcopenia. |
+| **7. `general_fitness_education_safety`** | Fitness Education & Interpretation | 14,989 | 15.3% | Strong foundation from PAGAC Executive Summary. |
+
+#### 10.5.2 Prevention of Single-Source Domination
+The largest single source in the accepted staging corpus is `US-HHS-PAGAC-2018-OLDER-ADULTS` at **18,167 tokens (18.6%)**, well below any monopolistic concentration threshold. No single entity accounts for more than a balanced fraction of the training data.
+
+#### 10.5.3 Primary Sources vs. Educational Syntheses
+- **Baseline Corpus (Phases 6–9)**: Exactly **306 documents (140,758 valid packed tokens)** authored via `educational_synthesis` curriculum design.
+- **Staging Corpus (Phase 10.2)**: Exactly **10 authentic primary-source documents (97,809 usable tokens)** directly extracted from official federal publications and peer-reviewed journal articles.
+- The pipeline preserves the distinction in manifest metadata under `authoring_method`:
+  - `primary_source_extract`: Authentic, legally reviewed primary documents.
+  - `educational_synthesis`: Verified pedagogical curriculum documents.
+
+---
+
+### 10.6 Task 5: Verification, Invariance Auditing & Completion Gate
+
+#### 10.6.1 Automated Test Execution Results
+The complete automated test suite was executed against the repository:
+```text
+tests/test_data.py: 64 passed
+tests/test_model.py: 17 passed
+tests/test_phase10.py: 49 passed
+tests/test_phase4.py: 16 passed
+tests/test_phase6.py: 13 passed
+tests/test_phase7.py: 10 passed
+tests/test_phase8.py: 8 passed
+tests/test_phase9.py: 16 passed
+tests/test_smoke.py: 4 passed
+tests/test_tokenizer.py: 27 passed
+tests/test_training.py: 15 passed
+-------------------------------------------------------
+Total: 239 passed in 44.15s (0 failures, 0 warnings)
+```
+
+#### 10.6.2 Authoritative Artifact Invariance Audit
+All core Phase 8 authoritative artifacts were verified to be cryptographically unmodified:
+- **Tokenizer**: [`artifacts/final_tokenizer/tokenizer.json`](file:///e:/NOVA/artifacts/final_tokenizer/tokenizer.json) (`1639cec0fce7263bbb10eca238b19a5d13ef6bd9fa1c545cd481f4e8ff9c93fc`) — **Unmodified** (vocab 3,384).
+- **Dataset Manifest**: [`data/prepared_expanded/manifest.json`](file:///e:/NOVA/data/prepared_expanded/manifest.json) (`9ebb8353f41faa16926a928a528eb64218753b305fb573b372a88f20208adc29`) — **Unmodified**.
+- **Prepared Training Tensors**: `data/prepared_expanded/train.pt` — **Unmodified**.
+- **Prepared Validation Tensors**: `data/prepared_expanded/val.pt` — **Unmodified**.
+- **Diagnostic Benchmark**: [`data/benchmark/fitness_eval_benchmark.json`](file:///e:/NOVA/data/benchmark/fitness_eval_benchmark.json) — **Unmodified**.
+- Model pretraining was not initiated, and model architecture was not modified.
+
+---
+
+### 10.7 Completion Gate Recommendation
+
+### **DECISION: PHASE 10.2 GATE PASSED — APPROVED FOR PHASE 11 CORPUS SCALING**
+
+### Gate Review Criteria Assessment:
+1. **Defensible Provenance**: All 10 approved documents originate from authenticated primary sources (`.gov` and `plos.org`), verified against official federal and journal repositories.
+2. **Applicable Reuse Rights**: All approved material is strictly compliant with 17 U.S.C. § 105 or CC BY 4.0. Ambiguous third-party trademark content (FM 7-22 Pose Method®) and proprietary works were successfully quarantined/rejected.
+3. **Acceptable Extraction Quality**: All accepted documents passed NFKC normalization, whitespace hygiene, repetition filters, and length gates.
+4. **Clean Partition Integrity**: Train and validation source partitions are strictly disjoint:
+   $$\text{TrainSources} \cap \text{ValSources} = \emptyset$$
+5. **Benchmark Isolation**: Zero contamination in the accepted corpus. Authentic source text with genuine answer leakage was quarantined without modification or doctoring.
+
+### Required Human-Review Actions for Phase 11:
+1. **Biomechanics (Pillar 3) Acquisition**: Acquire OpenStax Anatomy & Physiology 2e (Betts et al., CC BY 4.0) Chapter 10 (Muscle Tissue) and Chapter 11 (Musculoskeletal Mechanics) to populate Pillar 3 without commercial trademark complications.
+2. **Legal Resolution on FM 7-22**: Obtain legal counsel determination on whether Chapter 7 ("Pose Method®") can be excised from FM 7-22 to permit ingestion of the remaining uncontested military fitness chapters (~200,000 tokens).
+
+
