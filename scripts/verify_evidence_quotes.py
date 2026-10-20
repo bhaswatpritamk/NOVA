@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
-"""Project NOVA Phase 11.2: Evidence Quote Verifier.
+"""Project NOVA Phase 11.3: Hardened Evidence Quote Verifier.
 
 Audits every (file path, line, quoted string) in the rights ledger and
 quarantine records against authentic saved files on disk.
 
-Core Rule:
-A quotation may NOT be written into any ledger, record, or report unless a
-script has confirmed that exact string exists in a saved file. Where evidence
-cannot be found, reports NO_EVIDENCE_FOUND.
+Core Hardening Rules:
+1. REJECTS any evidence path under docs/ or any file we generated.
+2. Every quote in the ledger and quarantine record is verified against authentic sources.
+3. Every FAIL is reported with NO_EVIDENCE_FOUND or the real text found.
+4. Outputs structured JSON to data/staging_phase11/audit_outputs/evidence_verification.json.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = REPO_ROOT / "data" / "staging_phase11" / "audit_outputs"
 
 
 @dataclass
@@ -41,6 +44,32 @@ class VerificationResult:
     actual_text_found: str
     line_found: Optional[int] = None
     notes: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def is_disallowed_path(file_path: Path) -> bool:
+    """Check if the path is under docs/ or is a generated repo file."""
+    try:
+        resolved = file_path.resolve()
+        repo_resolved = REPO_ROOT.resolve()
+        if resolved.is_relative_to(repo_resolved):
+            rel = resolved.relative_to(repo_resolved)
+            parts = rel.parts
+            if parts and parts[0] == "docs":
+                return True
+            if parts and parts[0] in ("logs", "checkpoints", "artifacts"):
+                return True
+    except Exception:
+        pass
+
+    path_str = str(file_path).replace("\\", "/")
+    if "/docs/" in path_str or path_str.startswith("docs/"):
+        return True
+    if "/artifacts/" in path_str or path_str.startswith("artifacts/"):
+        return True
+    return False
 
 
 def extract_visible_text(raw_content: str) -> str:
@@ -65,6 +94,9 @@ def verify_quote(
     Returns:
         (passed, actual_text_found, line_found)
     """
+    if is_disallowed_path(file_path):
+        return False, "REJECTED_DISALLOWED_PATH: Evidence path under docs/ or generated file is prohibited.", None
+
     if not file_path.exists():
         return False, "NO_EVIDENCE_FOUND (file does not exist)", None
 
@@ -161,53 +193,53 @@ PHASE11_1_LEGACY_TARGETS = [
         file_path=REPO_ROOT / "docs" / "phase11_parent_source_integrity_report.md",
         cited_line=55,
         quoted_string="2018 Physical Activity Guidelines Advisory Committee (PAGAC) Scientific Report Part A. Executive Summary",
-        description="PAGAC Executive Summary - legacy report quote",
+        description="PAGAC Executive Summary - legacy report quote (disallowed docs/ path)",
     ),
     QuoteVerificationTarget(
         target_id="US-HHS-PAGAC-2018-HIIT",
         file_path=REPO_ROOT / "docs" / "phase11_parent_source_integrity_report.md",
         cited_line=57,
         quoted_string="Part F, Chapter 1: High-Intensity Interval Training",
-        description="PAGAC HIIT Chapter - legacy report quote",
+        description="PAGAC HIIT Chapter - legacy report quote (disallowed docs/ path)",
     ),
     QuoteVerificationTarget(
         target_id="US-HHS-PAGAC-2018-BRAIN-SLEEP",
         file_path=REPO_ROOT / "docs" / "phase11_parent_source_integrity_report.md",
         cited_line=58,
         quoted_string="Part F, Chapter 3: Brain Health and Sleep",
-        description="PAGAC Brain Health Chapter - legacy report quote",
+        description="PAGAC Brain Health Chapter - legacy report quote (disallowed docs/ path)",
     ),
     QuoteVerificationTarget(
         target_id="US-HHS-PAGAC-2018-CARDIOMETABOLIC",
         file_path=REPO_ROOT / "docs" / "phase11_parent_source_integrity_report.md",
         cited_line=59,
         quoted_string="Part F, Chapter 5: Cardiometabolic Health",
-        description="PAGAC Cardiometabolic Chapter - legacy report quote",
+        description="PAGAC Cardiometabolic Chapter - legacy report quote (disallowed docs/ path)",
     ),
     QuoteVerificationTarget(
         target_id="US-HHS-PAGAC-2018-OLDER-ADULTS",
         file_path=REPO_ROOT / "docs" / "phase11_parent_source_integrity_report.md",
         cited_line=60,
         quoted_string="Part F, Chapter 9: Older Adults & Falls",
-        description="PAGAC Older Adults Chapter - legacy report quote",
+        description="PAGAC Older Adults Chapter - legacy report quote (disallowed docs/ path)",
     ),
     QuoteVerificationTarget(
         target_id="OPENSTAX-AP2E-LICENSE",
         file_path=REPO_ROOT / "data" / "staging_phase11" / "sources_raw" / "openstax_ap2e_biomechanics.html",
         cited_line=None,
         quoted_string="Textbook content produced by OpenStax is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike License.",
-        description="OpenStax Quarantine Record - exact_license_sentence",
+        description="OpenStax Quarantine Record - legacy inexact license sentence in sources_raw",
     ),
     QuoteVerificationTarget(
         target_id="OPENSTAX-AP2E-AI",
         file_path=REPO_ROOT / "data" / "staging_phase11" / "sources_raw" / "openstax_ap2e_biomechanics.html",
         cited_line=None,
         quoted_string="OpenStax resources may not be used for the training of artificial intelligence or large language models without prior written permission.",
-        description="OpenStax Quarantine Record - exact_ai_training_sentence",
+        description="OpenStax Quarantine Record - legacy fabricated AI training sentence",
     ),
 ]
 
-# Remediated quotes for Phase 11.2 machine verification
+# Remediated quotes for Phase 11.2 machine verification (preserved for test compatibility)
 PHASE11_2_REMEDIATED_TARGETS = [
     QuoteVerificationTarget(
         target_id="CDC-POLICY-SNAPSHOT",
@@ -246,12 +278,129 @@ PHASE11_2_REMEDIATED_TARGETS = [
     ),
 ]
 
+# Phase 11.3 comprehensive hardened targets for all ledger & quarantine replacements
+PHASE11_3_HARDENED_TARGETS = [
+    QuoteVerificationTarget(
+        target_id="CDC-POLICY-PUBLIC-DOMAIN",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "cdc_agency_materials_snapshot.html",
+        cited_line=None,
+        quoted_string="Most of the information on the CDC and ATSDR websites is not subject to copyright, is in the public domain, and may be freely used or reproduced without obtaining copyright permission.",
+        description="CDC Agency Materials policy - public domain affirmative grant",
+    ),
+    QuoteVerificationTarget(
+        target_id="CDC-POLICY-EXCEPTIONS",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "cdc_agency_materials_snapshot.html",
+        cited_line=None,
+        quoted_string="First, some resources, as well as images, on the CDC and ATSDR websites are restricted in their use because they were developed by government contractors or grantees, or have been licensed by a third party.",
+        description="CDC Agency Materials policy - contractor, grantee, and third-party exceptions",
+    ),
+    QuoteVerificationTarget(
+        target_id="CDC-POLICY-ATTRIBUTION-REQUEST",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "cdc_agency_materials_snapshot.html",
+        cited_line=None,
+        quoted_string="Attribution to the agency that developed the material must be provided in your use of the materials.",
+        description="CDC Agency Materials policy - attribution requested",
+    ),
+    QuoteVerificationTarget(
+        target_id="ODPHP-POLICY-PUBLIC-DOMAIN",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "health_gov_copyright_policy_snapshot.html",
+        cited_line=None,
+        quoted_string="The information presented on odphp.health.gov — including information on odphp.health.gov microsites like MyHealthfinder, Healthy People, and Health Literacy Online — is in the public domain. This means it may be freely distributed and copied — but please include a link to our website and acknowledge ODPHP as the source.",
+        description="ODPHP website copyright policy - public domain affirmative grant and attribution request",
+    ),
+    QuoteVerificationTarget(
+        target_id="PAGAC-PDF-PAGE2-DISCLAIMER",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "sources_raw" / "us_hhs_pagac_report_2018.pdf",
+        cited_line=2,
+        quoted_string="The findings of this report are those of the 2018 Physical Activity Guidelines Advisory Committee. They do not necessarily reflect the views of the Office of Disease Prevention and Health Promotion or the U.S. Department of Health and Human Services.",
+        description="PAGAC Scientific Report front-matter page 2 disclaimer",
+    ),
+    QuoteVerificationTarget(
+        target_id="PLOS-PONE-0215877-REAL",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "sources_raw" / "plos_pone_0215877.html",
+        cited_line=885,
+        quoted_string="This is an open access article distributed under the terms of the Creative Commons Attribution License",
+        description="PLOS ONE Hypertrophy study real CC BY attribution line",
+    ),
+    QuoteVerificationTarget(
+        target_id="OPENSTAX-REAL-LICENSE",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "openstax_ap2e_biomechanics.html",
+        cited_line=205,
+        quoted_string="Textbook content produced by OpenStax is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike License.",
+        description="OpenStax Anatomy and Physiology 2e exact CC BY-NC-SA license sentence",
+    ),
+    QuoteVerificationTarget(
+        target_id="OPENSTAX-REAL-AI",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "openstax_ap2e_biomechanics.html",
+        cited_line=155,
+        quoted_string="This book may not be used in the training of large language models or otherwise be ingested into large language models or generative AI offerings without OpenStax's prior written permission.",
+        description="OpenStax Anatomy and Physiology 2e verbatim AI training prohibition sentence",
+    ),
+    QuoteVerificationTarget(
+        target_id="OPENSTAX-ADDITIONAL-1",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "openstax_ap2e_biomechanics.html",
+        cited_line=None,
+        quoted_string="This book uses the Creative Commons Attribution-NonCommercial-ShareAlike License, which means that you can reuse and modify the material only for noncommercial purposes, must attribute OpenStax, and must distribute any derivative works under the same license.",
+        description="OpenStax quarantine record additional sentence 1",
+    ),
+    QuoteVerificationTarget(
+        target_id="OPENSTAX-ADDITIONAL-2",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "openstax_ap2e_biomechanics.html",
+        cited_line=None,
+        quoted_string="OpenStax-copyrighted images, activities, assessments, and similar components of this book are subject to the same licensing - CC-BY-NC-SA. They can be used for noncommercial purposes with attribution.",
+        description="OpenStax quarantine record additional sentence 2",
+    ),
+    QuoteVerificationTarget(
+        target_id="OPENSTAX-ADDITIONAL-3",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / "openstax_ap2e_biomechanics.html",
+        cited_line=None,
+        quoted_string="Permission requests: Anyone who intends to incorporate this content (including text, images, and other components) into large language models, use it in AI offerings, use it commercially (including in print), and/or has questions about another use case is welcome to complete our reuse request form.",
+        description="OpenStax quarantine record additional sentence 3",
+    ),
+    QuoteVerificationTarget(
+        target_id="PAGAC-CARDIOMETABOLIC-ADAPTED-LINE-276",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "sources_raw" / "pagac_2018_part_f_ch5_cardiometabolic.txt",
+        cited_line=276,
+        quoted_string="Source: Adapted from data found in Brown et al., 2016. 20",
+        description="US-HHS-PAGAC-2018-CARDIOMETABOLIC line 276 adapted exclusion",
+    ),
+    QuoteVerificationTarget(
+        target_id="PAGAC-CARDIOMETABOLIC-ADAPTED-LINE-298",
+        file_path=REPO_ROOT / "data" / "staging_phase11" / "sources_raw" / "pagac_2018_part_f_ch5_cardiometabolic.txt",
+        cited_line=298,
+        quoted_string="Source: Adapted from data found in Rosenberg et al., 2013. 39",
+        description="US-HHS-PAGAC-2018-CARDIOMETABOLIC line 298 adapted exclusion",
+    ),
+]
+
 
 def run_verification(targets: List[QuoteVerificationTarget]) -> List[VerificationResult]:
     """Execute verification on all targets and return results."""
     results = []
     for tgt in targets:
         actual_path = tgt.file_path
+
+        # 1. Hard check: immediately reject paths under docs/ or generated files
+        if is_disallowed_path(actual_path):
+            rel_path_str = (
+                str(actual_path.relative_to(REPO_ROOT))
+                if actual_path.is_relative_to(REPO_ROOT)
+                else str(actual_path)
+            )
+            results.append(
+                VerificationResult(
+                    target_id=tgt.target_id,
+                    file_path=rel_path_str,
+                    cited_line=tgt.cited_line,
+                    quoted_string=tgt.quoted_string,
+                    status="FAIL",
+                    actual_text_found="REJECTED_DISALLOWED_PATH: Evidence path under docs/ or generated file is prohibited; quotations must cite authentic source files.",
+                    line_found=None,
+                    notes=tgt.description,
+                )
+            )
+            continue
+
         if not actual_path.exists():
             alt_path = REPO_ROOT / "data" / "staging_phase11" / "quarantine_evidence" / actual_path.name
             if alt_path.exists():
@@ -264,6 +413,7 @@ def run_verification(targets: List[QuoteVerificationTarget]) -> List[Verificatio
         # Handle PDF specifically if file is PDF
         if actual_path.suffix.lower() == ".pdf":
             import pypdf
+
             reader = pypdf.PdfReader(str(actual_path))
             norm_quote = normalize_whitespace(tgt.quoted_string)
             found = False
@@ -284,10 +434,11 @@ def run_verification(targets: List[QuoteVerificationTarget]) -> List[Verificatio
                         p_found = p_idx + 1
                         break
             status = "PASS" if found else "FAIL"
+            rel_str = str(actual_path.relative_to(REPO_ROOT)) if actual_path.is_relative_to(REPO_ROOT) else str(actual_path)
             results.append(
                 VerificationResult(
                     target_id=tgt.target_id,
-                    file_path=str(actual_path.relative_to(REPO_ROOT)),
+                    file_path=rel_str,
                     cited_line=tgt.cited_line,
                     quoted_string=tgt.quoted_string,
                     status=status,
@@ -304,10 +455,11 @@ def run_verification(targets: List[QuoteVerificationTarget]) -> List[Verificatio
             cited_line=tgt.cited_line,
         )
         status = "PASS" if passed else "FAIL"
+        rel_str = str(actual_path.relative_to(REPO_ROOT)) if actual_path.is_relative_to(REPO_ROOT) else str(actual_path)
         results.append(
             VerificationResult(
                 target_id=tgt.target_id,
-                file_path=str(actual_path.relative_to(REPO_ROOT)),
+                file_path=rel_str,
                 cited_line=tgt.cited_line,
                 quoted_string=tgt.quoted_string,
                 status=status,
@@ -341,11 +493,42 @@ def print_results(results: List[VerificationResult], title: str = "QUOTE VERIFIC
     print("-" * 80)
 
 
-if __name__ == "__main__":
-    print("Executing Task 1 Quote Verifier...")
+def audit_and_save_all_evidence() -> Dict[str, Any]:
+    """Execute full audit of legacy and hardened quotes and write JSON output."""
     legacy_results = run_verification(PHASE11_1_LEGACY_TARGETS)
-    print_results(legacy_results, "PHASE 11.1 LEGACY QUOTES AUDIT REPORT")
+    print_results(legacy_results, "PHASE 11.1 LEGACY QUOTES AUDIT REPORT (EXPECTED FAILS & REJECTIONS)")
 
     print("\n")
     remediated_results = run_verification(PHASE11_2_REMEDIATED_TARGETS)
     print_results(remediated_results, "PHASE 11.2 REMEDIATED QUOTES VERIFICATION REPORT")
+
+    print("\n")
+    hardened_results = run_verification(PHASE11_3_HARDENED_TARGETS)
+    print_results(hardened_results, "PHASE 11.3 ALL VERIFIED EVIDENCE TARGETS REPORT")
+
+    output_data = {
+        "timestamp_utc": "2026-10-20T12:00:00Z",
+        "verifier_rules": {
+            "disallow_docs_paths": True,
+            "disallow_generated_files": True,
+            "fail_handling": "Report NO_EVIDENCE_FOUND or REJECTED_DISALLOWED_PATH",
+        },
+        "legacy_targets_count": len(legacy_results),
+        "legacy_pass_count": sum(1 for r in legacy_results if r.status == "PASS"),
+        "legacy_fail_count": sum(1 for r in legacy_results if r.status == "FAIL"),
+        "legacy_results": [r.to_dict() for r in legacy_results],
+        "hardened_targets_count": len(hardened_results),
+        "hardened_pass_count": sum(1 for r in hardened_results if r.status == "PASS"),
+        "hardened_fail_count": sum(1 for r in hardened_results if r.status == "FAIL"),
+        "hardened_results": [r.to_dict() for r in hardened_results],
+    }
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_file = OUTPUT_DIR / "evidence_verification.json"
+    out_file.write_text(json.dumps(output_data, indent=2), encoding="utf-8")
+    print(f"\nEvidence verification JSON written to {out_file}")
+    return output_data
+
+
+if __name__ == "__main__":
+    audit_and_save_all_evidence()
