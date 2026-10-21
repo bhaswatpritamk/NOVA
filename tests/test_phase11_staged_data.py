@@ -27,17 +27,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STAGING_DIR = REPO_ROOT / "data" / "staging_phase11"
 
 
-@pytest.fixture(scope="module")
-def staging_data() -> dict:
-    """Load actual staging artifacts from disk."""
-    train_file = STAGING_DIR / "train_staging.json"
-    val_file = STAGING_DIR / "val_staging.json"
-    manifest_file = STAGING_DIR / "phase11_staging_manifest.json"
-    registry_file = STAGING_DIR / "intake_registry.json"
+@pytest.fixture(
+    scope="module",
+    params=[
+        ("data/staging_phase11", "phase11_staging_manifest.json", 97808),
+        ("data/staging_phase11_4", "phase11_4_staging_manifest.json", 167208),
+    ],
+    ids=["staging_phase11", "staging_phase11_4"],
+)
+def staging_data(request) -> dict:
+    """Load actual staging artifacts from disk for parameterized staging directory."""
+    staging_rel, manifest_filename, expected_tokens = request.param
+    staging_dir = REPO_ROOT / staging_rel
+    train_file = staging_dir / "train_staging.json"
+    val_file = staging_dir / "val_staging.json"
+    manifest_file = staging_dir / manifest_filename
+    registry_file = staging_dir / "intake_registry.json"
 
     assert train_file.is_file(), f"Missing train_staging.json at {train_file}"
     assert val_file.is_file(), f"Missing val_staging.json at {val_file}"
-    assert manifest_file.is_file(), f"Missing phase11_staging_manifest.json at {manifest_file}"
+    assert manifest_file.is_file(), f"Missing {manifest_filename} at {manifest_file}"
     assert registry_file.is_file(), f"Missing intake_registry.json at {registry_file}"
 
     train_docs = json.loads(train_file.read_text(encoding="utf-8"))
@@ -46,10 +55,12 @@ def staging_data() -> dict:
     registry = json.loads(registry_file.read_text(encoding="utf-8"))
 
     return {
+        "staging_dir": staging_dir,
         "train_docs": train_docs,
         "val_docs": val_docs,
         "manifest": manifest,
         "registry": registry,
+        "expected_tokens": expected_tokens,
     }
 
 
@@ -147,7 +158,9 @@ class TestPhase11StagedDataIntegrity:
             f"Manifest total mismatch: manifest['total_combined_tokens']={manifest['total_combined_tokens']} "
             f"vs sum_train_val={sum_train_val}"
         )
-        assert sum_train_val == 97808, f"Unexpected token total: {sum_train_val} (expected 97,808)"
+        assert sum_train_val == staging_data["expected_tokens"], (
+            f"Unexpected token total: {sum_train_val} (expected {staging_data['expected_tokens']})"
+        )
 
 
 # ==============================================================================
