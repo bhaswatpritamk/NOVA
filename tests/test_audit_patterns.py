@@ -45,3 +45,36 @@ def test_toc_pattern_variations():
     assert TOC_PATTERN.search("Introduction ....................................... F5-1") is not None
     assert TOC_PATTERN.search("Review of the Science . . . . . . . . . . . . . . . F5-3") is not None
     assert TOC_PATTERN.search("Normal text without dot leaders") is None
+
+
+def test_keyword_counter_repair_fixtures():
+    """Phase 11.5 requirement: Unit tests with fixtures: 'Falls', 'falls', 'Injury', 'Sleep', 'muscle‑strengthening' (non-breaking hyphen)."""
+    from scripts.audit_pillar_keywords import REGEX_SETS, normalize_keyword_text
+
+    # Injury regex set tests (case-insensitivity)
+    assert REGEX_SETS["injury"].search(normalize_keyword_text("Falls")) is not None
+    assert REGEX_SETS["injury"].search(normalize_keyword_text("falls")) is not None
+    assert REGEX_SETS["injury"].search(normalize_keyword_text("Injury")) is not None
+
+    # Sleep regex set test (case-insensitivity)
+    assert REGEX_SETS["sleep"].search(normalize_keyword_text("Sleep")) is not None
+    assert REGEX_SETS["sleep"].search(normalize_keyword_text("sleep")) is not None
+
+    # Strength regex set tests (muscle-strengthening variants, non-breaking hyphen U+2011)
+    non_breaking_hyphen_fixture = "muscle\u2011strengthening"
+    assert "\u2011" in non_breaking_hyphen_fixture
+    normalized = normalize_keyword_text(non_breaking_hyphen_fixture)
+    assert normalized == "muscle-strengthening"
+    assert REGEX_SETS["strength"].search(normalized) is not None
+
+    # Space variant equals hyphen variant
+    assert REGEX_SETS["strength"].search(normalize_keyword_text("muscle strengthening")) is not None
+    assert REGEX_SETS["strength"].search(normalize_keyword_text("muscle-strengthening")) is not None
+
+    # All unicode hyphens U+2010 through U+2015 and U+2212
+    for uchar in ["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", "\u2212"]:
+        sample = f"muscle{uchar}strengthening"
+        norm = normalize_keyword_text(sample)
+        assert norm == "muscle-strengthening"
+        assert REGEX_SETS["strength"].search(norm) is not None
+

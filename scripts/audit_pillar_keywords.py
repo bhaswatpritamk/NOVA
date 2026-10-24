@@ -24,6 +24,7 @@ Hard rules:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import re
 import sys
@@ -50,6 +51,21 @@ ACCEPTED_SOURCE_IDS = {
 
 CANONICAL_PILLAR_IDS = {p.value for p in FitnessPillar}
 
+ACCEPTED_SOURCE_IDS = {
+    "US-CDC-PA-ADULTS-2022",
+    "US-CDC-PA-MEASURING-2022",
+    "US-CDC-PA-OLDER-2022",
+    "US-CDC-NIOSH-HEAT-2016",
+    "PLOS-PONE-0215877",
+    "US-HHS-PAGAC-2018-EXEC",
+    "US-HHS-PAGAC-2018-HIIT",
+    "US-HHS-PAGAC-2018-BRAIN-SLEEP",
+    "US-HHS-PAGAC-2018-CARDIOMETABOLIC",
+    "US-HHS-PAGAC-2018-OLDER-ADULTS",
+}
+
+CANONICAL_PILLAR_IDS = {p.value for p in FitnessPillar}
+
 # A4: Set-to-pillar map defined in one config
 SET_TO_PILLAR_MAP: Dict[str, str] = {
     "strength": "strength_training_programming",
@@ -60,10 +76,21 @@ SET_TO_PILLAR_MAP: Dict[str, str] = {
 }
 PILLAR_TO_SET_MAP: Dict[str, str] = {v: k for k, v in SET_TO_PILLAR_MAP.items()}
 
-# Exact regex sets
+# Phase 11.5 Keyword Counter Repair:
+# - Case-insensitive matching (re.IGNORECASE)
+# - Normalize U+2010-U+2015 and U+2212 to '-'
+# - Treat "muscle strengthening" and "muscle-strengthening" as equal via muscle[\s-]+strengthening
+DASH_NORMALIZATION_PATTERN = re.compile(r"[\u2010-\u2015\u2212]")
+
+
+def normalize_keyword_text(text: str) -> str:
+    """Normalize Unicode hyphens/dashes (U+2010-U+2015, U+2212) to standard '-'."""
+    return DASH_NORMALIZATION_PATTERN.sub("-", text)
+
+
 REGEX_SETS: Dict[str, re.Pattern] = {
     "strength": re.compile(
-        r"resistance training|muscle-strengthening|strength training|repetition|hypertrophy",
+        r"resistance training|muscle[\s-]+strengthening|strength training|repetition|hypertrophy",
         re.IGNORECASE,
     ),
     "interval": re.compile(
@@ -87,6 +114,9 @@ REGEX_SETS: Dict[str, re.Pattern] = {
         re.IGNORECASE,
     ),
 }
+
+SLEEP_SANITY_PATTERN = re.compile(r"sleep", re.IGNORECASE)
+INJURY_SANITY_PATTERN = re.compile(r"injur|fall", re.IGNORECASE)
 
 
 def load_staged_documents(staging_dir: Path) -> List[Dict[str, Any]]:
@@ -143,9 +173,31 @@ def audit_document_keywords(doc: Dict[str, Any]) -> Dict[str, Any]:
     partition = doc.get("partition", "NOT_COMPUTED")
     raw_text = doc["text"]
 
-    lines = raw_text.splitlines()
-    words = raw_text.split()
+    # Normalize hyphens/dashes
+    normalized_text = normalize_keyword_text(raw_text)
+
+    lines = normalized_text.splitlines()
+    words = normalized_text.split()
     word_count = len(words)
+
+    # Sanity checks per Phase 11.5 requirements
+    if source_id == "US-HHS-PAGAC-2018-BRAIN-SLEEP":
+        sleep_matches = SLEEP_SANITY_PATTERN.findall(normalized_text)
+        if len(sleep_matches) < 50:
+            print(f"SANITY_FAIL: US-HHS-PAGAC-2018-BRAIN-SLEEP 'sleep' < 50 hits (found {len(sleep_matches)})")
+            print("Nearest lines to section:")
+            for l in lines[:20]:
+                print(f"  {l}")
+            sys.exit(1)
+
+    if source_id == "US-HHS-PAGAC-2018-OLDER-ADULTS":
+        injury_matches = INJURY_SANITY_PATTERN.findall(normalized_text)
+        if len(injury_matches) < 50:
+            print(f"SANITY_FAIL: US-HHS-PAGAC-2018-OLDER-ADULTS 'injur|fall' < 50 hits (found {len(injury_matches)})")
+            print("Nearest lines to section:")
+            for l in lines[:20]:
+                print(f"  {l}")
+            sys.exit(1)
 
     # Determine assigned set key from PILLAR_TO_SET_MAP
     pillar_set_key = PILLAR_TO_SET_MAP.get(assigned_pillar, "NOT_TESTABLE")
@@ -153,7 +205,8 @@ def audit_document_keywords(doc: Dict[str, Any]) -> Dict[str, Any]:
     set_results: Dict[str, Any] = {}
 
     for set_name, pattern in REGEX_SETS.items():
-        matches_count = len(pattern.findall(raw_text))
+        matches = pattern.findall(normalized_text)
+        matches_count = len(matches)
         density = (matches_count / word_count * 1000.0) if word_count > 0 else 0.0
 
         sample_lines = []
@@ -197,7 +250,7 @@ def audit_document_keywords(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_pillar_keyword_audit(
-    staging_dir: Path = REPO_ROOT / "data" / "staging_phase11",
+    staging_dir: Path = REPO_ROOT / "data" / "staging_phase11_4",
     output_dir: Path = REPO_ROOT / "data" / "staging_phase11_4" / "audit_outputs",
 ) -> Dict[str, Any]:
     """Execute pillar keyword audit across all 10 accepted documents."""
@@ -207,9 +260,9 @@ def run_pillar_keyword_audit(
     table_rows: List[Dict[str, Any]] = []
 
     print("=" * 115)
-    print("PHASE 11.4 A4 PILLAR KEYWORD DENSITY MATRIX (10 Real Documents)")
+    print(f"PHASE 11.5 KEYWORD DENSITY MATRIX (10 Real Documents in {staging_dir.name})")
     print("=" * 115)
-    print(f"{'source_id':<32} {'assigned_pillar':<35} {'set':<12} {'assigned_d':<12} {'all densities (strength, interval, sleep, nutrition, injury, biomech)'}")
+    print(f"{'source_id':<32} {'assigned_pillar':<35} {'set':<12} {'assigned_d':<12} {'all counts & densities (strength, interval, sleep, nutrition, injury, biomech)'}")
     print("-" * 115)
 
     for doc in documents:
@@ -224,7 +277,8 @@ def run_pillar_keyword_audit(
         )
 
         all_d_str = "; ".join(
-            f"{k}={v['density_per_1000_words']:.2f}" for k, v in doc_res["all_set_results"].items()
+            f"{k}={v['match_count']} ({v['density_per_1000_words']:.2f}/1k)"
+            for k, v in doc_res["all_set_results"].items()
         )
 
         print(
@@ -246,13 +300,18 @@ def run_pillar_keyword_audit(
                     k: v["density_per_1000_words"]
                     for k, v in doc_res["all_set_results"].items()
                 },
+                "match_counts": {
+                    k: v["match_count"]
+                    for k, v in doc_res["all_set_results"].items()
+                },
             }
         )
 
     print("=" * 115)
 
+    timestamp_now = datetime.now(timezone.utc).isoformat()
     output_data = {
-        "timestamp_utc": "2026-10-21T12:00:00Z",
+        "timestamp_utc": timestamp_now,
         "staging_source": str(staging_dir),
         "documents_audited_count": len(documents),
         "set_to_pillar_map": SET_TO_PILLAR_MAP,
@@ -265,7 +324,9 @@ def run_pillar_keyword_audit(
     output_dir.mkdir(parents=True, exist_ok=True)
     out_file = output_dir / "pillar_keyword_density.json"
     out_file.write_text(json.dumps(output_data, indent=2), encoding="utf-8")
-    print(f"Pillar keyword density audit written to {out_file}")
+    repair_file = output_dir / "keyword_counter_repair.json"
+    repair_file.write_text(json.dumps(output_data, indent=2), encoding="utf-8")
+    print(f"Pillar keyword density audit written to {out_file} and {repair_file}")
     return output_data
 
 
@@ -274,7 +335,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--staging-dir",
         type=Path,
-        default=REPO_ROOT / "data" / "staging_phase11",
+        default=REPO_ROOT / "data" / "staging_phase11_4",
         help="Path to directory containing train_staging.json and val_staging.json",
     )
     parser.add_argument(
@@ -285,3 +346,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     run_pillar_keyword_audit(staging_dir=args.staging_dir, output_dir=args.output_dir)
+
