@@ -922,3 +922,101 @@ class TestPhase101ExtractionAndSafetyFixtures:
         critical_flags2 = [f for f in flags2 if f["severity"] in ("CRITICAL", "HIGH")]
         assert len(critical_flags2) == 0, f"False positive on injury prevention warm-up: {critical_flags2}"
 
+
+# =============================================================================
+# 11. Phase 10.2: Benchmark Contamination Resolution & Offset Auditing
+# =============================================================================
+
+class TestPhase102BenchmarkResolution:
+    """Verifies rigorous resolution of benchmark title references, offset preservation, and leakage quarantine."""
+
+    def test_harmless_title_reference_not_quarantined(self, benchmark: FitnessEvaluationBenchmark):
+        """Standard publication titles (e.g. CDC measuring guide citing PAG 2nd edition) must not trigger quarantine."""
+        detector = BenchmarkContaminationDetector(benchmark, n_gram_len=8)
+        text = (
+            "For more information regarding relative aerobic intensity, see Appendix 1 of the "
+            "Physical Activity Guidelines for Americans, 2nd edition, pages 58 to 60 for detailed scales."
+        )
+        res = detector.check_text(text)
+        assert res.is_contaminated is False, "Harmless publication title reference was incorrectly quarantined!"
+        assert res.has_bibliographic_match is True
+        assert len(res.matches) > 0
+
+        match = res.matches[0]
+        assert match.is_bibliographic_title is True
+        assert match.is_genuine_leakage is False
+        assert match.benchmark_question_id == "BENCH_P7_FACT_01"
+        assert match.benchmark_version == "1.0.0"
+        assert "Harmless citation match" in match.decision_rationale
+
+        # Verify character offset accuracy
+        extracted_snippet = text[match.char_start:match.char_end]
+        assert "Physical Activity Guidelines for Americans, 2nd edition" in extracted_snippet
+
+    def test_genuine_prompt_leakage_quarantined(self, benchmark: FitnessEvaluationBenchmark):
+        """Operative inquiry question text must be detected as genuine leakage and quarantined."""
+        detector = BenchmarkContaminationDetector(benchmark, n_gram_len=8)
+        text = (
+            "In this study, we examine what are the minimum weekly physical activity recommendations "
+            "for substantial health benefits in adults according to recent literature."
+        )
+        res = detector.check_text(text)
+        assert res.is_contaminated is True, "Substantive question leakage failed to trigger quarantine!"
+        assert any(m.is_genuine_leakage for m in res.matches)
+        assert any(m.match_origin == "Prompt" for m in res.matches)
+        assert "QUARANTINE" in res.decision_rationale
+
+    def test_genuine_answer_leakage_quarantined(self, benchmark: FitnessEvaluationBenchmark):
+        """Canonical reference answer key text must be detected as genuine leakage and quarantined."""
+        detector = BenchmarkContaminationDetector(benchmark, n_gram_len=8)
+        text = (
+            "As stated in our summary, adults require a weekly volume of 150 to 300 minutes of "
+            "moderate-intensity physical activity or alternatively 75 to 150 minutes of vigorous aerobic exercise."
+        )
+        res = detector.check_text(text)
+        assert res.is_contaminated is True, "Canonical answer key leakage failed to trigger quarantine!"
+        assert any(m.is_genuine_leakage for m in res.matches)
+        assert any(m.match_origin == "Answer" for m in res.matches)
+        assert any("CRITICAL" in m.decision_rationale for m in res.matches)
+
+    def test_mixed_title_and_leakage_quarantined(self, benchmark: FitnessEvaluationBenchmark):
+        """Text containing both a publication title and substantive prompt leakage must be quarantined."""
+        detector = BenchmarkContaminationDetector(benchmark, n_gram_len=8)
+        text = (
+            "Consult the Physical Activity Guidelines for Americans, 2nd edition to determine "
+            "what are the minimum weekly physical activity recommendations for substantial health benefits in adults."
+        )
+        res = detector.check_text(text)
+        assert res.has_bibliographic_match is True
+        assert res.is_contaminated is True, "Genuine leakage was masked by bibliographic title!"
+        assert any(m.is_genuine_leakage for m in res.matches)
+
+    def test_pipeline_audit_preserves_matches_and_offsets(self, benchmark: FitnessEvaluationBenchmark, tmp_path: Path):
+        """SourceIngestionPipeline must preserve match offsets, question ID, and rationale on NormalizedDocument."""
+        pipeline = SourceIngestionPipeline(benchmark=benchmark, state_file=tmp_path / "test_state.json")
+        sample_path = tmp_path / "cdc_measuring_sample.md"
+        sample_path.write_text(
+            "Intensity scales can be referenced in the Physical Activity Guidelines for Americans, 2nd edition appendix. "
+            "Moderate activity allows talking but not singing, whereas vigorous activity prevents speaking full sentences.",
+            encoding="utf-8",
+        )
+        meta = {
+            "source_id": "US-CDC-PA-MEASURING-TEST",
+            "title": "Measuring Activity Sample",
+            "license": "Public Domain",
+            "legal_basis": "17 U.S.C. § 105",
+            "pillar": "exercise_physiology",
+        }
+        docs = pipeline.ingest_file(sample_path, meta)
+        assert len(docs) == 1, "Document with harmless publication title citation should be accepted."
+        doc = docs[0]
+        assert doc.benchmark_contamination is False
+        assert len(doc.benchmark_matches) > 0
+        b_match = doc.benchmark_matches[0]
+        assert b_match["is_bibliographic_title"] is True
+        assert b_match["benchmark_question_id"] == "BENCH_P7_FACT_01"
+        assert b_match["char_start"] > 0
+        assert b_match["char_end"] > b_match["char_start"]
+        assert "BIBLIOGRAPHIC_CITATION_MATCH" in doc.review_notes
+
+

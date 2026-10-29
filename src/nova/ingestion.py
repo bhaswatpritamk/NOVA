@@ -134,6 +134,7 @@ class LicenseCategory(str, Enum):
     OPEN_GOVERNMENT = "OPEN_GOVERNMENT"
     RESTRICTED_NON_COMMERCIAL = "RESTRICTED_NON_COMMERCIAL"
     RESTRICTED_NO_DERIVATIVES = "RESTRICTED_NO_DERIVATIVES"
+    AI_TRAINING_PROHIBITED = "AI_TRAINING_PROHIBITED"
     PROPRIETARY = "PROPRIETARY"
     UNKNOWN = "UNKNOWN"
 
@@ -172,10 +173,13 @@ def audit_license(
     is_us_gov_employee_work: Optional[bool] = None,
     has_third_party_copyright: Optional[bool] = None,
     third_party_exclusions: str = "",
+    text_content: str = "",
 ) -> LicenseGateResult:
     """Strictly audit a license for training compliance.
 
     Rules:
+    - AI Training Prohibitions: Scans page text, front matter, and terms for language prohibiting
+      LLM or generative-AI training without permission, REGARDLESS of stated Creative Commons license.
     - US Federal Government works under 17 U.S.C. § 105 are domestic public domain within the United States.
       * Material created by official federal officers/employees in the scope of official employment is domestic public domain.
       * Does NOT automatically imply worldwide public domain status (foreign copyright may apply depending on jurisdiction).
@@ -190,6 +194,50 @@ def audit_license(
     """
     l_norm = (license_name or "").strip().lower()
     b_norm = (legal_basis or "").strip().lower()
+
+    # 0. AI/LLM Training Prohibition Scan (runs FIRST, regardless of stated Creative Commons or Public Domain status)
+    combined_scan = f"{license_name}\n{legal_basis}\n{text_content}".lower()
+    ai_prohibition_patterns = [
+        r"may not be used for (?:the )?training of artificial intelligence",
+        r"training of artificial intelligence or large language models",
+        r"(?:training of artificial intelligence|training of.*large language models).*without (?:prior )?(?:written )?permission",
+        r"without (?:prior )?(?:written )?permission.*(?:training of artificial intelligence|training of.*large language models)",
+        r"(?:prohibit\w*|forbid\w*|no|not permit\w*)\s+(?:the\s+)?(?:use|training|ingest\w*|scrap\w*)\b.*?\b(?:ai|artificial intelligence|llm|large language model|generative ai|machine learning)",
+        r"(?:ai|artificial intelligence|llm|generative ai|machine learning)\s+training\s+(?:is\s+)?(?:prohibited|forbidden|not permitted|disallowed)",
+        r"(?:no|not)\s+(?:authorized|permitted)\s+for\s+(?:ai|machine learning|llm)\s+training",
+    ]
+    is_ai_prohibited = any(re.search(pat, combined_scan, re.IGNORECASE) for pat in ai_prohibition_patterns)
+    if is_ai_prohibited:
+        rej_reason = (
+            "AI/LLM training prohibition: Source explicitly prohibits artificial intelligence, "
+            "machine learning, or large language model training without prior written permission."
+        )
+        if allow_human_override and reviewer_id.strip():
+            return LicenseGateResult(
+                is_compliant=True,
+                category=LicenseCategory.AI_TRAINING_PROHIBITED,
+                license_name=license_name,
+                legal_basis=legal_basis or "Bilateral AI Training Permission Granted",
+                requires_attribution=True,
+                rejection_reason="",
+                human_override_approved=True,
+                reviewer_id=reviewer_id.strip(),
+                review_notes=reviewer_notes or "Human legal review verified bilateral AI training authorization.",
+                is_us_gov_employee_work=is_us_gov_employee_work,
+                has_third_party_copyright=has_third_party_copyright,
+                third_party_exclusions=third_party_exclusions,
+            )
+        return LicenseGateResult(
+            is_compliant=False,
+            category=LicenseCategory.AI_TRAINING_PROHIBITED,
+            license_name=license_name,
+            legal_basis=legal_basis or "AI Training Prohibited by Terms/Front Matter",
+            requires_attribution=False,
+            rejection_reason=rej_reason,
+            is_us_gov_employee_work=is_us_gov_employee_work,
+            has_third_party_copyright=has_third_party_copyright,
+            third_party_exclusions=third_party_exclusions,
+        )
 
     # 1. US Government work
     if "17 u.s.c" in b_norm or "17 usc" in b_norm or "u.s. government work" in b_norm or ("public domain" in l_norm and "cc0" not in l_norm):
@@ -380,6 +428,8 @@ class NormalizedDocument:
     title: str
     text: str
     pillar: str  # FitnessPillar.value
+    parent_source_id: str = ""
+    canonical_source_url: str = ""
     authoring_method: AuthoringMethod = AuthoringMethod.PRIMARY_SOURCE_EXTRACT
     author: str = ""
     publisher: str = ""
@@ -400,11 +450,16 @@ class NormalizedDocument:
     token_count: int = 0
     safety_flags: List[Dict[str, str]] = field(default_factory=list)
     benchmark_contamination: bool = False
+    benchmark_matches: List[Dict[str, Any]] = field(default_factory=list)
     ingestion_status: IngestionStatus = IngestionStatus.APPROVED
     review_notes: str = ""
     transformation_history: List[str] = field(default_factory=list)
 
     def __post_init__(self):
+        if not self.parent_source_id:
+            self.parent_source_id = self.source_id
+        if not self.canonical_source_url:
+            self.canonical_source_url = self.url
         if not self.char_count:
             self.char_count = len(self.text)
         if not self.word_count:
@@ -431,6 +486,8 @@ class NormalizedDocument:
         return cls(
             doc_id=data["doc_id"],
             source_id=data["source_id"],
+            parent_source_id=data.get("parent_source_id", data.get("source_id", "")),
+            canonical_source_url=data.get("canonical_source_url", data.get("url", "")),
             title=data.get("title", ""),
             text=data["text"],
             pillar=data["pillar"],
@@ -454,6 +511,7 @@ class NormalizedDocument:
             token_count=int(data.get("token_count", 0)),
             safety_flags=list(data.get("safety_flags", [])),
             benchmark_contamination=bool(data.get("benchmark_contamination", False)),
+            benchmark_matches=list(data.get("benchmark_matches", [])),
             ingestion_status=IngestionStatus(data.get("ingestion_status", IngestionStatus.APPROVED.value)),
             review_notes=data.get("review_notes", ""),
             transformation_history=list(data.get("transformation_history", [])),
@@ -650,6 +708,11 @@ def extract_text_from_pdf_stream(pdf_bytes: bytes) -> str:
         if e_idx == -1:
             break
 
+        # Skip image and font streams to avoid decompressing large non-text bitmaps
+        if b"/Image" in dict_text or b"/Font" in dict_text:
+            pos = e_idx + 9
+            continue
+
         data_end = e_idx
         if pdf_bytes[data_end - 2:data_end] == b"\r\n":
             data_end -= 2
@@ -806,28 +869,99 @@ class HealthSafetyScreener:
 # 7. Held-Out Benchmark Contamination Screener
 # =============================================================================
 
+# Exact recognized formal publication titles / standard legal document citations
+# appearing as bibliographic attribution or prompt prefixes in benchmark items.
+# These represent legitimate publication entity names rather than question/answer logic.
+RECOGNIZED_BIBLIOGRAPHIC_TITLES: Set[str] = {
+    "the physical activity guidelines for americans 2nd edition",
+    "physical activity guidelines for americans 2nd edition",
+    "the physical activity guidelines for americans second edition",
+    "physical activity guidelines for americans second edition",
+    "the 2018 physical activity guidelines advisory committee scientific",
+    "2018 physical activity guidelines advisory committee scientific report",
+    "openstax anatomy and physiology 2e section",
+    "dietary guidelines for americans 2020 2025",
+}
+
+
+@dataclass
+class ContaminationMatch:
+    """Detailed record of a benchmark n-gram match preserving exact offsets and rationale."""
+
+    matched_ngram: str
+    match_origin: str  # 'PROMPT' or 'ANSWER'
+    benchmark_question_id: str
+    benchmark_version: str
+    char_start: int
+    char_end: int
+    matched_snippet: str
+    is_bibliographic_title: bool
+    is_genuine_leakage: bool
+    decision_rationale: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ContaminationCheckResult:
+    """Result of contamination screening against held-out benchmark."""
+
+    is_contaminated: bool
+    has_bibliographic_match: bool
+    matches: List[ContaminationMatch] = field(default_factory=list)
+    decision_rationale: str = ""
+    benchmark_version: str = "1.0.0"
+
+    def to_summary_strings(self) -> List[str]:
+        """Backward-compatible summary strings for logging."""
+        summaries = []
+        for m in self.matches:
+            status = "BIBLIOGRAPHIC_CITATION" if m.is_bibliographic_title else "GENUINE_LEAKAGE"
+            summaries.append(
+                f"{m.match_origin} n-gram match ({m.benchmark_question_id} v{m.benchmark_version} "
+                f"[{m.char_start}:{m.char_end}]): '{m.matched_ngram}' [{status}]"
+            )
+        return summaries
+
+    def __iter__(self):
+        """Enable backward-compatible tuple unpacking: is_contaminated, matches = detector.check_text(text)"""
+        yield self.is_contaminated
+        yield self.to_summary_strings()
+
+
 class BenchmarkContaminationDetector:
-    """Verifies that ingested text does not leak held-out diagnostic benchmark questions or answers."""
+    """Verifies that ingested text does not leak held-out diagnostic benchmark questions or answers.
+
+    Distinguishes substantive inquiry/answer leakage from harmless formal publication title
+    references (e.g. 'the Physical Activity Guidelines for Americans 2nd edition').
+    Records exact character offsets, benchmark question ID, benchmark version, and rationale.
+    """
 
     def __init__(self, benchmark: Optional[FitnessEvaluationBenchmark] = None, n_gram_len: int = 8):
         self.n_gram_len = n_gram_len
         self.benchmark = benchmark
+        self.benchmark_version = getattr(benchmark, "version", "1.0.0") if benchmark else "1.0.0"
         self.benchmark_ngrams: Set[str] = set()
         self.prompt_ngrams: Set[str] = set()
         self.answer_ngrams: Set[str] = set()
+        self.ngram_to_question: Dict[str, str] = {}
+        self.bibliographic_title_ngrams: Set[str] = set(RECOGNIZED_BIBLIOGRAPHIC_TITLES)
 
         if self.benchmark:
             self._index_benchmark()
 
     def _index_benchmark(self) -> None:
-        """Index word n-grams from all benchmark questions and canonical answers."""
+        """Index word n-grams from all benchmark questions and canonical answers with provenance."""
         for q in self.benchmark.questions.values():
+            q_id = q.question_id
             # Index prompt
             p_words = re.findall(r"\b\w+\b", q.prompt.lower())
             for i in range(len(p_words) - self.n_gram_len + 1):
                 ng = " ".join(p_words[i : i + self.n_gram_len])
                 self.prompt_ngrams.add(ng)
                 self.benchmark_ngrams.add(ng)
+                self.ngram_to_question[ng] = q_id
 
             # Index canonical answer
             if q.canonical_reference_answer:
@@ -836,30 +970,106 @@ class BenchmarkContaminationDetector:
                     ng = " ".join(a_words[i : i + self.n_gram_len])
                     self.answer_ngrams.add(ng)
                     self.benchmark_ngrams.add(ng)
+                    self.ngram_to_question[ng] = q_id
 
-    def check_text(self, text: str) -> Tuple[bool, List[str]]:
+    def check_text(self, text: str) -> ContaminationCheckResult:
         """Check text for n-gram contamination against the benchmark.
 
-        Returns:
-            Tuple of (is_contaminated, list_of_matches).
+        Returns ContaminationCheckResult (supports tuple unpacking for backward compatibility).
         """
         if not self.benchmark_ngrams:
-            return False, []
+            return ContaminationCheckResult(
+                is_contaminated=False,
+                has_bibliographic_match=False,
+                matches=[],
+                decision_rationale="No benchmark n-grams indexed; clean.",
+                benchmark_version=self.benchmark_version,
+            )
 
-        words = re.findall(r"\b\w+\b", text.lower())
-        if len(words) < self.n_gram_len:
-            return False, []
+        # Extract words along with their character offsets in the original text
+        word_tokens = [(m.group(0).lower(), m.start(), m.end()) for m in re.finditer(r"\b\w+\b", text)]
+        if len(word_tokens) < self.n_gram_len:
+            return ContaminationCheckResult(
+                is_contaminated=False,
+                has_bibliographic_match=False,
+                matches=[],
+                decision_rationale="Text shorter than n-gram threshold; clean.",
+                benchmark_version=self.benchmark_version,
+            )
 
-        matches: List[str] = []
-        for i in range(len(words) - self.n_gram_len + 1):
-            ng = " ".join(words[i : i + self.n_gram_len])
+        matches: List[ContaminationMatch] = []
+        for i in range(len(word_tokens) - self.n_gram_len + 1):
+            window = word_tokens[i : i + self.n_gram_len]
+            ng = " ".join(w[0] for w in window)
+
             if ng in self.benchmark_ngrams:
-                origin = "Prompt" if ng in self.prompt_ngrams else "Answer"
-                matches.append(f"{origin} n-gram match: '{ng}'")
-                if len(matches) >= 5:
+                char_start = window[0][1]
+                char_end = window[-1][2]
+                matched_snippet = text[char_start:char_end]
+                q_id = self.ngram_to_question.get(ng, "BENCHMARK_UNKNOWN")
+
+                if ng in self.answer_ngrams:
+                    origin = "Answer"
+                    is_bib = False
+                    is_leak = True
+                    rationale = f"CRITICAL: Substantive canonical reference answer leakage detected from {q_id}."
+                else:
+                    origin = "Prompt"
+                    if ng in self.bibliographic_title_ngrams:
+                        is_bib = True
+                        is_leak = False
+                        rationale = (
+                            f"Harmless citation match: Formal publication title reference ('{ng}') "
+                            f"in {q_id} prompt citation prefix. No operative prompt logic or answer leakage."
+                        )
+                    else:
+                        is_bib = False
+                        is_leak = True
+                        rationale = f"CRITICAL: Substantive benchmark prompt inquiry leakage detected from {q_id}."
+
+                matches.append(
+                    ContaminationMatch(
+                        matched_ngram=ng,
+                        match_origin=origin,
+                        benchmark_question_id=q_id,
+                        benchmark_version=self.benchmark_version,
+                        char_start=char_start,
+                        char_end=char_end,
+                        matched_snippet=matched_snippet,
+                        is_bibliographic_title=is_bib,
+                        is_genuine_leakage=is_leak,
+                        decision_rationale=rationale,
+                    )
+                )
+                if len(matches) >= 10:
                     break
 
-        return len(matches) > 0, matches
+        has_genuine_leakage = any(m.is_genuine_leakage for m in matches)
+        has_bib = any(m.is_bibliographic_title for m in matches)
+        is_contaminated = has_genuine_leakage
+
+        if is_contaminated:
+            leak_qids = sorted(list({m.benchmark_question_id for m in matches if m.is_genuine_leakage}))
+            decision_rationale = (
+                f"QUARANTINE: Genuine benchmark contamination detected ({len(matches)} match(es) "
+                f"affecting items: {', '.join(leak_qids)})."
+            )
+        elif has_bib:
+            bib_qids = sorted(list({m.benchmark_question_id for m in matches if m.is_bibliographic_title}))
+            decision_rationale = (
+                f"ACCEPTED: Harmless publication title reference matched ({len(matches)} match(es) "
+                f"affecting items: {', '.join(bib_qids)}). No question or answer leakage."
+            )
+        else:
+            decision_rationale = "ACCEPTED: Zero benchmark n-gram matches."
+
+        return ContaminationCheckResult(
+            is_contaminated=is_contaminated,
+            has_bibliographic_match=has_bib,
+            matches=matches,
+            decision_rationale=decision_rationale,
+            benchmark_version=self.benchmark_version,
+        )
 
 
 # =============================================================================
@@ -998,11 +1208,12 @@ def source_level_split(
     val_ratio: float = 0.15,
     seed: int = 42,
 ) -> Tuple[List[NormalizedDocument], List[NormalizedDocument]]:
-    """Partition documents into train and val at the source and duplicate-cluster level.
+    """Partition documents into train and val at the publication, source, and duplicate-cluster level.
 
     Guarantees:
     - Zero source cross-contamination (set(train_source_ids).isdisjoint(set(validation_source_ids)) is strictly True).
-    - If multiple documents share a source_id, every document from that source remains in the same partition.
+    - Zero parent-publication cross-contamination (set(train_parent_ids).isdisjoint(set(validation_parent_ids)) is strictly True).
+    - If multiple documents or chapters share a parent publication (parent_source_id), every chapter remains in the same partition.
     - Near-duplicate groups never cross partitions (documents in the same cluster remain in the same partition).
     - Deterministic reproducibility with random seed.
     """
@@ -1015,7 +1226,7 @@ def source_level_split(
 
     rng = np.random.RandomState(seed)
 
-    # 1. Disjoint Set Union (Connected Components) linking sources and duplicate groups
+    # 1. Disjoint Set Union (Connected Components) linking sources, parent publications, and duplicate groups
     parent: Dict[str, str] = {}
 
     def find(x: str) -> str:
@@ -1037,9 +1248,14 @@ def source_level_split(
 
     for doc in documents:
         src_node = f"SRC::{doc.source_id}"
+        p_id = doc.parent_source_id or doc.source_id
+        parent_node = f"PARENT::{p_id}"
         find(src_node)
+        find(parent_node)
+        union(src_node, parent_node)
         if doc.group_id:
             grp_node = f"GRP::{doc.group_id}"
+            find(grp_node)
             union(src_node, grp_node)
 
     # 2. Group documents by connected component root
@@ -1065,8 +1281,14 @@ def source_level_split(
     val_roots: Set[str] = set()
     current_val_docs = 0
 
+    # Never allocate a single dominant cluster representing >=50% of the entire corpus to val
+    # unless val_ratio >= 0.5.
+    max_single_cluster_ratio = 0.5 if val_ratio < 0.5 else 1.0
+
     for r in shuffled_roots:
         count = len(clusters[r])
+        if count >= total_docs * max_single_cluster_ratio and val_ratio < 0.5:
+            continue
         # Leave at least 1 cluster for train
         if len(val_roots) + 1 >= len(shuffled_roots):
             break
@@ -1076,8 +1298,13 @@ def source_level_split(
             if current_val_docs >= target_val_docs:
                 break
 
+    # If no cluster was added and val_ratio > 0 and len(shuffled_roots) >= 2,
+    # pick the smallest cluster (that is < total_docs) for validation
     if not val_roots and val_ratio > 0 and len(shuffled_roots) >= 2:
-        val_roots.add(shuffled_roots[0])
+        eligible = [r for r in sorted_roots if len(clusters[r]) < total_docs]
+        if eligible:
+            smallest_root = min(eligible, key=lambda k: len(clusters[k]))
+            val_roots.add(smallest_root)
 
     train_docs: List[NormalizedDocument] = []
     val_docs: List[NormalizedDocument] = []
@@ -1087,6 +1314,19 @@ def source_level_split(
             val_docs.extend(clusters[r])
         else:
             train_docs.extend(clusters[r])
+
+    # Strict Invariant Verification
+    train_srcs = {d.source_id for d in train_docs}
+    val_srcs = {d.source_id for d in val_docs}
+    assert train_srcs.isdisjoint(val_srcs), f"Source ID leakage detected: {train_srcs & val_srcs}"
+
+    train_parents = {d.parent_source_id for d in train_docs if d.parent_source_id}
+    val_parents = {d.parent_source_id for d in val_docs if d.parent_source_id}
+    assert train_parents.isdisjoint(val_parents), f"Parent publication leakage detected: {train_parents & val_parents}"
+
+    train_grps = {d.group_id for d in train_docs if d.group_id}
+    val_grps = {d.group_id for d in val_docs if d.group_id}
+    assert train_grps.isdisjoint(val_grps), f"Duplicate group leakage detected: {train_grps & val_grps}"
 
     return train_docs, val_docs
 
@@ -1230,6 +1470,7 @@ class SourceIngestionPipeline:
             is_us_gov_employee_work=source_metadata.get("is_us_gov_employee_work"),
             has_third_party_copyright=source_metadata.get("has_third_party_copyright"),
             third_party_exclusions=source_metadata.get("third_party_exclusions", ""),
+            text_content=raw_bytes.decode("utf-8", errors="ignore"),
         )
 
         source_id = source_metadata.get("source_id", p.stem.upper())
@@ -1240,6 +1481,8 @@ class SourceIngestionPipeline:
             quarantine_doc = NormalizedDocument(
                 doc_id=f"REJ-{source_id}-{p.stem}",
                 source_id=source_id,
+                parent_source_id=source_metadata.get("parent_source_id", source_id),
+                canonical_source_url=source_metadata.get("canonical_source_url", source_metadata.get("url", "")),
                 title=source_metadata.get("title", p.name),
                 text="",
                 pillar=pillar,
@@ -1276,6 +1519,8 @@ class SourceIngestionPipeline:
                 quarantine_doc = NormalizedDocument(
                     doc_id=f"QUAR-{source_id}-{p.stem}",
                     source_id=source_id,
+                    parent_source_id=source_metadata.get("parent_source_id", source_id),
+                    canonical_source_url=source_metadata.get("canonical_source_url", source_metadata.get("url", "")),
                     title=source_metadata.get("title", p.name),
                     text="",
                     pillar=pillar,
@@ -1338,6 +1583,8 @@ class SourceIngestionPipeline:
             quarantine_doc = NormalizedDocument(
                 doc_id=f"QUAR-{source_id}-{p.stem}",
                 source_id=source_id,
+                parent_source_id=source_metadata.get("parent_source_id", source_id),
+                canonical_source_url=source_metadata.get("canonical_source_url", source_metadata.get("url", "")),
                 title=source_metadata.get("title", p.name),
                 text=cleaned_text[:500],
                 pillar=pillar,
@@ -1386,7 +1633,9 @@ class SourceIngestionPipeline:
         critical_flags = [f for f in safety_flags if f.get("severity") in ("CRITICAL", "HIGH")]
 
         # Step 2: Benchmark Contamination Screening
-        is_contaminated, contamination_matches = self.contamination_detector.check_text(text)
+        check_res = self.contamination_detector.check_text(text)
+        is_contaminated = check_res.is_contaminated
+        contamination_matches = check_res.to_summary_strings()
 
         status = IngestionStatus.APPROVED
         notes = []
@@ -1394,6 +1643,9 @@ class SourceIngestionPipeline:
         if is_contaminated:
             status = IngestionStatus.QUARANTINED
             notes.append(f"BENCHMARK CONTAMINATION: {'; '.join(contamination_matches)}")
+        elif check_res.has_bibliographic_match:
+            bib_matches = [f"{m.matched_snippet} ({m.benchmark_question_id})" for m in check_res.matches if m.is_bibliographic_title]
+            notes.append(f"BIBLIOGRAPHIC_CITATION_MATCH: {'; '.join(bib_matches)}")
 
         if critical_flags:
             status = IngestionStatus.QUARANTINED
@@ -1415,6 +1667,8 @@ class SourceIngestionPipeline:
         doc = NormalizedDocument(
             doc_id=doc_id,
             source_id=source_id,
+            parent_source_id=source_metadata.get("parent_source_id", source_id),
+            canonical_source_url=source_metadata.get("canonical_source_url", source_metadata.get("url", "")),
             title=title,
             text=text,
             pillar=pillar,
@@ -1427,13 +1681,14 @@ class SourceIngestionPipeline:
             license=source_metadata.get("license", "Public Domain"),
             legal_basis=source_metadata.get("legal_basis", "17 U.S.C. § 105"),
             attribution_required=bool(source_metadata.get("attribution_required", False)),
-            attribution_text=source_metadata.get("attribution_text", ""),
+            attribution_text=source_metadata.get("mandatory_attribution_text", source_metadata.get("attribution_text", "")),
             extraction_method=extraction_method,
             raw_sha256=raw_sha256,
             group_id=source_metadata.get("group_id", source_id),
             token_count=token_count,
             safety_flags=safety_flags,
             benchmark_contamination=is_contaminated,
+            benchmark_matches=[m.to_dict() for m in check_res.matches],
             ingestion_status=status,
             review_notes="; ".join(notes),
             transformation_history=[
