@@ -1,0 +1,7 @@
+data/prepared_expanded/** -text
+data/benchmark/** -text
+*.json -text
+*.jsonl -text
+*.model -text
+*.pt -text
+*.sh text eol=lf
