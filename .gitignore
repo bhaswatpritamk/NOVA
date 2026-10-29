@@ -68,7 +68,6 @@ data/staging_phase10/
 data/sources_raw_phase10/
 
 # Local source downloads and archives
-scripts/sources/
 
 # Generated model artifacts and checkpoints
 artifacts/*
